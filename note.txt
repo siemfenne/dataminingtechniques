@@ -1,0 +1,19 @@
+Q1: How to treat NaN values in valence and arousel
+A1: You could do two things: just take the average of the day and assign that to your NaN
+    Or
+    Use nearest neighbours (you get more points)
+
+Q2: We have very skewed distibutions, so the IQR method is not helpful, what do we do?
+A2: Normalize data 
+
+Q3: With what do we replace the outliers?
+A3: Replace with NaN and use same method as Q1
+
+Q4: We are going to predict the average mood on the next day. So we will aggregate (taking the average) of the mood per day.  
+    However, for valence and arousal for example, taking the average will not result in an integer [-2,2]. What do we need to do?
+A4: First make an correlogram to see which variables are highly correlated with mood. Then decide which one to keep.
+    (he said valence and arousal weren't highly correlated). 
+
+Notes:
+First make a correlogram to decide which features to keep (note that you cannot use a correlogram for categorial and numerical attributes). 
+Then once you have decided which ones to keep, decide which ones to aggregate. 
