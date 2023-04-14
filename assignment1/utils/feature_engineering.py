@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from load import load_processed_data_csv
+from utils.load import load_processed_data_csv
 
 def feature_engineering():
     df = load_processed_data_csv()
@@ -9,8 +9,17 @@ def feature_engineering():
         index=['id', 'date'],
         columns=['variable'], 
         aggfunc=[np.sum, np.mean, "count"]).reset_index()
+    
+    # remove periods with inconsecutive days of mood data
     df = remove_days_with_no_mood(df)
+    
+    # compute the features
     df = compute_features(df)
+    
+    # dropna values from targets and store
+    targets = df.mood.shift(-1)
+    targets = targets.dropna()
+    features = features[targets.index]
     store_features_and_targets(df)
     
 def remove_days_with_no_mood(df):
@@ -26,8 +35,9 @@ def compute_features(df, window = 5):
     targets = df["mood"]
     features = df.rolling(window).apply(agg_config)
     
-def store_features_and_targets(df: pd.DataFrame, filename: str = "data_features_targets", path: str = "../data/"):
-    df.to_csv(path + filename + ".csv")
+def store_features_and_targets(features: pd.DataFrame, targets: pd.DataFrame, filename: str = "data_features", path: str = "data/"):
+    features.to_csv(path + filename + "_X.csv")
+    targets.to_csv(path + filename + "_y.csv")
     
 agg_config = {
     "appCat.builtin": [],

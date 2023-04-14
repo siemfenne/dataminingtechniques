@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from load import load_raw_data_csv
+from utils.load import load_raw_data_csv
 from sklearn.preprocessing import MinMaxScaler
 import warnings
 warnings.simplefilter('ignore')
@@ -11,8 +11,8 @@ def clean_data():
     
     # clean data
     df = load_raw_data_csv()
-    df = remove_outliers(df)
-    # df = normalize_data(df)
+    remove_outliers(df)
+    # normalize_data(df)
     
     # aggregate here(?)
     
@@ -42,7 +42,7 @@ def remove_outliers(df: pd.DataFrame):
     the variablelist using the iqr method. Values of the variablelist are first 
     transformed to log values to counter the skewness of the distributions.
     """
-    columns_to_remove_outliers = [column for column in df.variable.unique() if "appCat." in column or column == "screen"]
+    columns_to_remove_outliers = [column for column in df.variable.unique() if "appCat." in column or column in ["screen", "activity"]]
     
     for column in columns_to_remove_outliers:
         
@@ -64,7 +64,6 @@ def handle_nan_values(df: pd.DataFrame):
             for nan_index in nan_indices:
                 nan_datum = df[nan_index].date
                 df[nan_index] = np.nanmean(df[(df.date == nan_datum) & (df.id == id) & (df.variable == column)].value.values)
-    return df
 
 # def normalize_data(df: pd.DataFrame):
 #     columns_to_normalize = ()
@@ -76,11 +75,7 @@ def handle_nan_values(df: pd.DataFrame):
 #             df[(df.id == id) & (df.)]
 #     return df
 
-def store_processed_data(df: pd.DataFrame, filename: str = "data_processed", path: str = "../data/"):
+def store_processed_data(df: pd.DataFrame, filename: str = "dataset_processed", path: str = "data/"):
     total_file_path = path + filename + ".csv"
     print("Storing file under path %s ..." % (total_file_path))
     df.to_csv(total_file_path)
-    
-    
-if __name__ == "__main__":
-    clean_data()
