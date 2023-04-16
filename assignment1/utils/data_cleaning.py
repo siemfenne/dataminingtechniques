@@ -2,9 +2,6 @@ import pandas as pd
 import numpy as np
 from utils.load import load_raw_data_csv
 from sklearn.preprocessing import MinMaxScaler
-import warnings
-warnings.simplefilter('ignore')
-
 
 def clean_data():
     """ roept alle functies hieronder aan """
@@ -12,7 +9,7 @@ def clean_data():
     # clean data
     df = load_raw_data_csv()
     remove_outliers(df)
-    # normalize_data(df)
+    normalize_data(df)
     
     # aggregate here(?)
     
@@ -49,7 +46,7 @@ def remove_outliers(df: pd.DataFrame):
         df_var = pd.DataFrame(columns=['value'])
         df_var['value'] = np.log(df[df.variable == column].value)
         corrected = iqr_correction(data=df_var)
-        df[df.variable == column].value = np.exp(corrected)
+        df[df.variable == column].value = corrected #np.exp(corrected)
         
     return df
     
@@ -65,15 +62,16 @@ def handle_nan_values(df: pd.DataFrame):
                 nan_datum = df[nan_index].date
                 df[nan_index] = np.nanmean(df[(df.date == nan_datum) & (df.id == id) & (df.variable == column)].value.values)
 
-# def normalize_data(df: pd.DataFrame):
-#     columns_to_normalize = ()
-#     scaler = MinMaxScaler()
+def normalize_data(df: pd.DataFrame):
+    columns_to_normalize = [column for column in df.variable.unique() if "appCat." in column or column in ["screen", "activity"]]
+    scaler = MinMaxScaler()
+    ids = tuple(df.id.unique())
     
-#     ids = tuple(df.id.unique())
-#     for id in ids:
-#         for column in columns_to_normalize:
-#             df[(df.id == id) & (df.)]
-#     return df
+    for column in columns_to_normalize:
+        values = df[df.variable == column].value
+        if len(values) > 0:
+            df[df.variable == column].value = scaler.fit_transform(values.values.reshape(-1,1))
+    return df
 
 def store_processed_data(df: pd.DataFrame, filename: str = "dataset_processed", path: str = "data/"):
     total_file_path = path + filename + ".csv"

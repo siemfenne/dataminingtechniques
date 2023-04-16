@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from sklearn.svm import SVR
-from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import GridSearchCV, KFold
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.model_selection import train_test_split
 
@@ -30,7 +30,7 @@ def fit_svr(random_state=42):
     param_grid = {
         "C": [1e1, 1e0, 1e-1, 1e-2],
     }
-    grid_search = GridSearchCV(estimator=SVR(), param_grid=param_grid)
+    grid_search = GridSearchCV(estimator=SVR(), cv=KFold(n_splits=5), param_grid=param_grid)
     grid_search.fit(X_train, y_train)
     best_params, scores = grid_search.best_params_
     
@@ -43,6 +43,14 @@ def fit_svr(random_state=42):
         "mae": mae
     }
     
+    
+######################
+###### MODEL z #######
+######################
+def fit_baseline():
+    """ the baseline model is an AR(1) with coefficient = 1 """
+    X, y = load_feature_target_set("data/")
+    # X = y.shift(1)
     
 #######################
 ## GENERAL FUNCTIONS ##
@@ -57,4 +65,5 @@ model_functions = {
     "nn": fit_nn,
     "xgb": fit_xgb,
     "svr": fit_svr,
+    "baseline": fit_baseline
 }
