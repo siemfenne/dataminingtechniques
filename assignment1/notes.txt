@@ -17,3 +17,8 @@ A4: First make an correlogram to see which variables are highly correlated with 
 Notes:
 First make a correlogram to decide which features to keep (note that you cannot use a correlogram for categorial and numerical attributes). 
 Then once you have decided which ones to keep, decide which ones to aggregate. 
+
+
+
+- add dummy for missing value interpolation yes/no
+- 

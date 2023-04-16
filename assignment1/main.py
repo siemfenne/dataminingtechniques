@@ -13,6 +13,7 @@ if __name__ == "__main__":
     parser.add_argument("-f", "--feature", help="true if feature engineering", type=bool, default=False)
     parser.add_argument("-m", "--models", nargs="+", help="models to train, can be: " + " ".join(list(model_functions.keys())), action="append", default=[["xgb"]])
     parser.add_argument("-w", "--window", help="count for time window", type=int, default=6)
+    parser.add_argument("-k", "--k_features", help="the number of features to select", type=int, default=20)
     
     args = parser.parse_args()
     args.models = args.models[0]
@@ -23,6 +24,6 @@ if __name__ == "__main__":
     if args.clean or args.feature:
         feature_engineering(args)
         
-    # cross validate, train and evaluate out-of-sample each model
-    for model in args.models:
-        model_functions[model]()
+    # # cross validate, train and evaluate out-of-sample each model
+    # for model in args.models:
+    #     model_functions[model]()
