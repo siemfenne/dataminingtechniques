@@ -22,6 +22,7 @@ def load_processed_data_csv(path="data/", filename="dataset_processed"):
 
 def load_feature_target_set(path="data/", filename="dataset_features"):
     """ return the processed features """
-    X = pd.read_csv(path + filename + "_X.csv")
-    y = pd.read_csv(path + filename + "_y.csv")
-    return X, y
+    X_recurrent = pd.read_csv(path + "X_recurrent.pkl")
+    X_simple = pd.read_csv(path + "X_simple.pkl")
+    y = pd.read_csv(path + "y.pkl")
+    return X_recurrent, X_simple, y

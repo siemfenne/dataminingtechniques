@@ -14,6 +14,7 @@ if __name__ == "__main__":
     parser.add_argument("-m", "--models", nargs="+", help="models to train, can be: " + " ".join(list(model_functions.keys())), action="append", default=[["xgb"]])
     parser.add_argument("-w", "--window", help="count for time window", type=int, default=6)
     parser.add_argument("-k", "--k_features", help="the number of features to select", type=int, default=20)
+    parser.add_argument("-a", "--agg_window", help="the window (of days) to aggregate on", type=int, default=5)
     
     args = parser.parse_args()
     args.models = args.models[0]

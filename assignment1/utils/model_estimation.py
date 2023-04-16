@@ -11,20 +11,20 @@ from utils.load import load_feature_target_set
 ###### MODEL X #######
 ######################
 def fit_nn():
-    X, y = load_feature_target_set()
+    X, _, y = load_feature_target_set()
 
 ######################
 ###### MODEL Y #######
 ######################
 def fit_xgb():
-    X, y = load_feature_target_set()
+    _, X, y = load_feature_target_set()
 
 ######################
 ###### MODEL z #######
 ######################
 def fit_svr(random_state=42):
     
-    X, y = load_feature_target_set()
+    _, X, y = load_feature_target_set()
     X_train, X_test, y_train, y_test = train_test_split(X, y, train_size=.8, shuffle=True, random_state=random_state)
     
     param_grid = {

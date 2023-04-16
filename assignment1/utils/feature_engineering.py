@@ -4,6 +4,7 @@ from utils.load import load_processed_data_csv
 from argparse import Namespace
 from sklearn.metrics import mean_squared_error, mean_absolute_percentage_error
 from sklearn.preprocessing import MinMaxScaler
+import pickle as pkl
 
 def feature_engineering(args: Namespace):
     # load cleaned data
@@ -30,16 +31,16 @@ def feature_engineering(args: Namespace):
     df = userid_to_dummies(df)
     df = select_important_features_by_univariate_selection(args, df)
     
-    # import seaborn as sns
-    # import matplotlib.pyplot as plt
-    # sns.heatmap(df[df.columns[:25]].corr())
-    # plt.show()
-    # v = df.corr()["mean_mood_initial"].sort_values()
-    # print(v)
-    # features, targets = df_to_features_and_targets(df, args)
+    # for id in df.id.unique():
+    #     df_sort = df[df.id==id].sort_values(by="date")
+    #     r = df_sort.date.diff()
+    #     print(id)
+    #     print(r.value_counts())
     
-    # store_features_and_targets(features, targets, path = "data/")
-    
+    X_simple, X_recurrent, y = df_to_features_and_targets(args, df)
+
+    store_features_and_targets(X_simple, X_recurrent, y, path = "data/")
+
 def add_categorical_for_part_of_day(df: pd.DataFrame, window: int = 6):
     
     if 24 % window > 0:
@@ -128,13 +129,15 @@ def missing_value_interpolation(df: pd.DataFrame):
     return df
 
 def userid_to_dummies(df: pd.DataFrame):
+    ids = df["id"]
     df = pd.get_dummies(data=df, columns=["id"])
+    df["id"] = ids
     return df
 
 def select_important_features_by_univariate_selection(args, df):
-    targets = ["mean_mood_initial"]
-    exclude_from_selection = ["date"] + [c for c in df.columns if "time_window" in c or "id_" in c]
-    feature_columns = [c for c in df.columns if c not in targets and c not in exclude_from_selection]
+    target_column = ["mean_mood_initial"]
+    exclude_from_selection = ["date"] + [c for c in df.columns if "time_window" in c or "id" in c]
+    feature_columns = [c for c in df.columns if c not in target_column and c not in exclude_from_selection]
     features = df[feature_columns]
     print("Selecting features on: \n", feature_columns)
     
@@ -148,11 +151,48 @@ def select_important_features_by_univariate_selection(args, df):
     print("Selected features are: \n", selected_features)
     
     # return selected features + targets and date
-    return df[list(selected_features) + exclude_from_selection + targets]
+    return df[list(selected_features) + exclude_from_selection + target_column]
 
-def df_to_features_and_targets(df: pd.DataFrame):
+def df_to_features_and_targets(args, df: pd.DataFrame):
+
+    X_simple = []
+    X_recurrent = []
+    y = []
     
-    return pd.DataFrame(), pd.DataFrame()
+    for id in df.id.unique():
+        df_id = df[df.id == id]
+        for i, row in df_id.iterrows():
+            target_row = df_id.loc[i]
+            target_mood = target_row["mean_mood_initial"]
+            if pd.isna(target_mood):
+                continue
+            target_date = target_row.date
+            
+            feature_date_min = target_date - pd.Timedelta(args.agg_window, "D")
+            feature_date_max = target_date - pd.Timedelta(1, "D")
+            
+            df_recurrent = df_id[(df_id.date >= feature_date_min) & (df_id.date <= feature_date_max)]
+            if len(df_recurrent) < args.agg_window:
+                continue
+
+            # the recurrent part
+            df_recurrent = df_recurrent.reset_index(drop=True)
+            df_recurrent["pos"] = (np.array(df_recurrent.index) + 1)[::-1]
+            df_recurrent = df_recurrent.drop(["id", "date", "mean_mood_initial"], axis = 1)
+            X_recurrent.append(df_recurrent)
+                
+            y.append(target_mood)
+            
+        
+    # features_window = df.rolling("{args.agg_window}D", min_periods=args.agg_window).agg()
+    # features_window = features_window.dropna()
+    # features = pd.merge()
+    # target = df["mean_mood_initial"].shift(-1)
+    
+    # for i in df:
+    #     df.loc[i-window:i]
+    
+    return X_simple, X_recurrent, y
             
 def remove_days_with_no_mood(df):
     return df[df.mood.count > 0]
@@ -184,9 +224,14 @@ def normalize_data(df: pd.DataFrame):
     return df
 
     
-def store_features_and_targets(features: pd.DataFrame, targets: pd.DataFrame, filename: str = "data_features", path: str = "data/"):
-    features.to_csv(path + filename + "_X.csv")
-    targets.to_csv(path + filename + "_y.csv")
+def store_features_and_targets(X_simple: list, X_recurrent: list, y: list, filename: str = "data_features", path: str = "data/"):
+    
+    with open(path + 'x_recurrent.pkl', 'wb') as f:
+        pkl.dump(X_recurrent, f)
+    with open(path + 'x_simple.pkl', 'wb') as f:
+        pkl.dump(X_simple, f)
+    with open(path + 'y.pkl', 'wb') as f:
+        pkl.dump(y, f)
     
 agg_config = {
     "appCat.builtin": [],
