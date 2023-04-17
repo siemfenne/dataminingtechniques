@@ -19,6 +19,14 @@ First make a correlogram to decide which features to keep (note that you cannot 
 Then once you have decided which ones to keep, decide which ones to aggregate. 
 
 
+- 2 manieren van missing value interpolation (knn means wordt nu gebruikt)
+- stratified split 
+- recurrent neural network
+- 
 
-- add dummy for missing value interpolation yes/no
-- hoe split voor train en test doen (random)
+om te varieren in de hele pipeline:
+- hoeveel SelectKBest
+- missing values hoe invullen of verwijderen
+- window of aggregation
+- modellen vergelijken
+- feature selection misschien mee spelen
