@@ -1,4 +1,5 @@
 import pandas as pd
+import pickle as pkl
 
 
 def load_raw_data_csv(path="data/", filename="dataset_mood_smartphone"):
@@ -22,7 +23,19 @@ def load_processed_data_csv(path="data/", filename="dataset_processed"):
 
 def load_feature_target_set(path="data/", filename="dataset_features"):
     """ return the processed features """
-    X_recurrent = pd.read_csv(path + "X_recurrent.pkl")
-    X_simple = pd.read_csv(path + "X_simple.pkl")
-    y = pd.read_csv(path + "y.pkl")
-    return X_recurrent, X_simple, y
+    with open(path + 'x_recurrent.pkl', 'rb') as f:
+        X_recurrent = pkl.load(f)
+    with open(path + 'x_simple.pkl', 'rb') as f:
+        X_simple = pkl.load(f)
+    with open(path + 'x_baseline.pkl', 'rb') as f:
+        X_baseline = pkl.load(f)
+    with open(path + 'y.pkl', 'rb') as f:
+        y = pkl.load(f)
+        
+    # import numpy as np
+    # train_pct = .8
+    # train_index = np.random.choice(range(len(y)), replace=False, size = int(train_pct*len(y)))
+    # test_index = 
+    
+    return X_recurrent, X_simple, X_baseline, y
+

@@ -37,9 +37,9 @@ def feature_engineering(args: Namespace):
     #     print(id)
     #     print(r.value_counts())
     
-    X_simple, X_recurrent, y = df_to_features_and_targets(args, df)
+    X_simple, X_recurrent, X_baseline, y = df_to_features_and_targets(args, df)
 
-    store_features_and_targets(X_simple, X_recurrent, y, path = "data/")
+    store_features_and_targets(X_simple, X_recurrent, X_baseline, y, path = "data/")
 
 def add_categorical_for_part_of_day(df: pd.DataFrame, window: int = 6):
     
@@ -157,6 +157,7 @@ def df_to_features_and_targets(args, df: pd.DataFrame):
 
     X_simple = []
     X_recurrent = []
+    X_baseline = []
     y = []
     
     for id in df.id.unique():
@@ -168,31 +169,44 @@ def df_to_features_and_targets(args, df: pd.DataFrame):
                 continue
             target_date = target_row.date
             
+            # for recurrent & simple, use the same window size
             feature_date_min = target_date - pd.Timedelta(args.agg_window, "D")
             feature_date_max = target_date - pd.Timedelta(1, "D")
             
-            df_recurrent = df_id[(df_id.date >= feature_date_min) & (df_id.date <= feature_date_max)]
-            if len(df_recurrent) < args.agg_window:
+            # select rows in window and check for no missing dates
+            df_in_window = df_id[(df_id.date >= feature_date_min) & (df_id.date <= feature_date_max)]
+            if len(df_in_window) < args.agg_window:
                 continue
 
-            # the recurrent part
+            # the X_recurrent part
+            df_recurrent = df_in_window.copy()
             df_recurrent = df_recurrent.reset_index(drop=True)
             df_recurrent["pos"] = (np.array(df_recurrent.index) + 1)[::-1]
             df_recurrent = df_recurrent.drop(["id", "date", "mean_mood_initial"], axis = 1)
             X_recurrent.append(df_recurrent)
+            
+            # the baseline part
+            X_baseline.append(df_recurrent.iloc[-1]["mean_mood"])
+            
+            # the X_simple part
+            df_simple = df_in_window.copy()
+            # for c in df_simple.columns:
+            #     print(c)
+            columns_to_agg_for = [c for c in df_simple.columns if c not in ["date", "id", "mean_mood_initial"]]
+        
+            agg_dict = {}
+            for column in columns_to_agg_for:
+                agg_dict[column] = [np.mean, np.std]
+            agg_data = np.array(df_recurrent.apply(agg_dict).values).reshape(-1)
+            X_simple.append(agg_data)
                 
+            # store target mood (same for recurrent and simple)
             y.append(target_mood)
             
-        
-    # features_window = df.rolling("{args.agg_window}D", min_periods=args.agg_window).agg()
-    # features_window = features_window.dropna()
-    # features = pd.merge()
-    # target = df["mean_mood_initial"].shift(-1)
+    X_simple = np.array(X_simple)
+    X_baseline = np.array(X_baseline).reshape(-1)
     
-    # for i in df:
-    #     df.loc[i-window:i]
-    
-    return X_simple, X_recurrent, y
+    return X_simple, X_recurrent, X_baseline, y
             
 def remove_days_with_no_mood(df):
     return df[df.mood.count > 0]
@@ -224,12 +238,14 @@ def normalize_data(df: pd.DataFrame):
     return df
 
     
-def store_features_and_targets(X_simple: list, X_recurrent: list, y: list, filename: str = "data_features", path: str = "data/"):
+def store_features_and_targets(X_simple: np.ndarray, X_recurrent: list, X_baseline: np.ndarray, y: list, filename: str = "data_features", path: str = "data/"):
     
     with open(path + 'x_recurrent.pkl', 'wb') as f:
         pkl.dump(X_recurrent, f)
     with open(path + 'x_simple.pkl', 'wb') as f:
         pkl.dump(X_simple, f)
+    with open(path + 'x_baseline.pkl', 'wb') as f:
+        pkl.dump(X_baseline, f)
     with open(path + 'y.pkl', 'wb') as f:
         pkl.dump(y, f)
     

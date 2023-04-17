@@ -21,4 +21,4 @@ Then once you have decided which ones to keep, decide which ones to aggregate.
 
 
 - add dummy for missing value interpolation yes/no
-- 
+- hoe split voor train en test doen (random)

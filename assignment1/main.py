@@ -8,10 +8,11 @@ warnings.simplefilter('ignore')
 
 if __name__ == "__main__":
     
+    # werkt niet, hoeren ding
     parser = argparse.ArgumentParser()
     parser.add_argument("-c", "--clean", help="true if clean data", type=bool, default=False)
     parser.add_argument("-f", "--feature", help="true if feature engineering", type=bool, default=False)
-    parser.add_argument("-m", "--models", nargs="+", help="models to train, can be: " + " ".join(list(model_functions.keys())), action="append", default=[["xgb"]])
+    parser.add_argument("-m", "--models", nargs="+", help="models to train, can be: " + " ".join(list(model_functions.keys())), action="append", default=[["baseline", "lgb"]])
     parser.add_argument("-w", "--window", help="count for time window", type=int, default=6)
     parser.add_argument("-k", "--k_features", help="the number of features to select", type=int, default=20)
     parser.add_argument("-a", "--agg_window", help="the window (of days) to aggregate on", type=int, default=5)
@@ -25,6 +26,6 @@ if __name__ == "__main__":
     if args.clean or args.feature:
         feature_engineering(args)
         
-    # # cross validate, train and evaluate out-of-sample each model
-    # for model in args.models:
-    #     model_functions[model]()
+    # cross validate, train and evaluate out-of-sample each model
+    for model in args.models:
+        model_functions[model]()
