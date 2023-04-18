@@ -79,6 +79,7 @@ def add_categorical_for_part_of_day(df: pd.DataFrame, window: int = 6):
     df_time_window.columns = list(df_time_window["count"].columns)
     df_time_window.rename(columns="_".join, inplace=True)
     df = pd.merge(df_attr, df_time_window, on=["date", "id"])
+    
     return df
     
 def missing_value_interpolation(df: pd.DataFrame):

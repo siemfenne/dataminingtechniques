@@ -30,3 +30,9 @@ om te varieren in de hele pipeline:
 - window of aggregation
 - modellen vergelijken
 - feature selection misschien mee spelen
+
+TODO:
+- stratified split werkend krijgen
+- functies om rnn te trainen + evaluation (evaluate(model, data, criterion)))
+- store figures voor alle modellen (histogram van errors of scatter plot zoiets)
+- 
