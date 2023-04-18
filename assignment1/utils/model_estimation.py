@@ -30,30 +30,20 @@ def evaluation_model_torch(mod: nn.Module, data, criterion):
     return loss.item()
 
 def stratified_split_by_id(X_recurrent, X_simple, X_baseline, y):
-    import random
-    from random import shuffle
-    random.seed(5)
+    id_columns = [c for c in X_recurrent[0].columns if "id_" in c]
+    df_ids = pd.DataFrame(columns = id_columns, data = [list(x.iloc[0][id_columns].values) for x in X_recurrent])
+    id_series = df_ids.apply(lambda x: x.idxmax(), axis = 1)
     
-    number_of_ids = len([c for c in X_recurrent[0].columns if "id_" in c])
-    dummy_ids = np.asarray([list(x.iloc[0][[c for c in x.columns if "id_" in c]]) for x in X_recurrent]).reshape(-1,number_of_ids)
-    
-    blocks, _ = np.unique(dummy_ids, return_inverse=True)
-    block_count = np.bincount(_)
-    where = np.argsort(_)
-    block_start = np.concatenate(([0], np.cumsum(block_count)[:-1]))
+    from sklearn.model_selection import train_test_split, StratifiedShuffleSplit
+    for (train_idx, test_idx) in StratifiedShuffleSplit(n_splits=1, train_size=.8, random_state=42).split(id_series, id_series):
+        pass
+    # train_idx, test_idx = list(train_idx).astype(int), list(test_idx).astype(int)
 
-    x = 4/5 + 3/5/(block_count - 2)
-    x = np.clip(x, 0, 1) # if n in (2, 3), the ratio is larger than 1
-    threshold = np.repeat(x, block_count)
-    threshold[block_start] = 1 # first item goes to A
-    threshold[block_start + 1] = 0 # seconf item goes to B
-
-    idx = threshold > np.random.rand(len(dummy_ids))
-    print(idx, len(idx))
-    X_simple_train, X_simple_test = X_simple[where[idx]], X_simple[~where[idx]]
-    X_recurrent_train, X_recurrent_test = X_recurrent[where[idx]], X_recurrent[~where[idx]]
-    X_baseline_train, X_baseline_test = X_baseline[where[idx]], X_baseline[~where[idx]]
-    y_train, y_test = y[where[idx]], y[~where[idx]]
+    X_simple, X_recurrent, X_baseline, y = np.asarray(X_simple), np.asarray(X_recurrent), np.asarray(X_baseline), np.array(y)
+    X_simple_train, X_simple_test = X_simple[train_idx], X_simple[test_idx]
+    X_recurrent_train, X_recurrent_test = X_recurrent[train_idx], X_recurrent[test_idx]
+    X_baseline_train, X_baseline_test = X_baseline[train_idx], X_baseline[test_idx]
+    y_train, y_test = y[train_idx], y[test_idx]
     return X_simple_train, X_recurrent_train, X_baseline_train, y_train, X_simple_test, X_recurrent_test, X_baseline_test, y_test
 
 ######################
@@ -110,11 +100,7 @@ class DataSet(Dataset):
     
 def fit_rnn():
     X_recurrent, X_simple, X_baseline, y = load_feature_target_set()
-    # X_train, _, _, y_train, X_test, _, _, y_test = stratified_split_by_id(X_recurrent, X_simple, X_baseline, y)
-    from copy import deepcopy
-    X_train = deepcopy(X_recurrent)
-    X_train = np.asarray([np.asarray(x.values) for x in X_train])
-    y_train = y
+    _, X_train, _, y_train, _, X_test, _, y_test = stratified_split_by_id(X_recurrent, X_simple, X_baseline, y)
         
     n_features = X_train[0].shape[1]
     kf = KFold(10, shuffle=True, random_state=52)
@@ -124,6 +110,8 @@ def fit_rnn():
     batch_size = 10
 
     train_data = DataSet(X_train, y_train)
+    res_fold_train = {}
+    res_fold_test = {}
     
     for i, (train_idx, validate_idx) in enumerate(kf.split(train_data.x_t), 1):
 
@@ -166,6 +154,17 @@ def fit_rnn():
 
             training_loss_list.append(training_loss)
             validation_loss_list.append(validation_loss)
+        res_fold_train[i] = training_loss_list
+        res_fold_test[i] = validation_loss_list
+    # for key in res_fold_train:
+    #     plt.plot(res_fold_train[key], label = str(key))
+    # plt.legend()
+    # plt.show()
+    # for key in res_fold_test:
+    #     plt.plot(res_fold_test[key], label = str(key))
+    # plt.legend()
+    # plt.show()
+
 
 ######################
 ###### MODEL XGB #######
@@ -243,11 +242,13 @@ def fit_baseline():
     _, _, X_train, y_train, _, _, X_test, y_test = stratified_split_by_id(X_recurrent, X_simple, X_baseline, y)
     X: np.ndarray
     y_pred = X_test.copy()
-    mse = mean_squared_error(y, y_pred)
-    mae = mean_absolute_error(y, y_pred)
+    mse = mean_squared_error(y_test, y_pred)
+    mae = mean_absolute_error(y_test, y_pred)
     
     import matplotlib.pyplot as plt
-    plt.hist(np.array(y).reshape(-1) - np.array(y_pred).reshape(-1))
+    plt.hist(np.array(y_test).reshape(-1) - np.array(y_pred).reshape(-1))
+    plt.show()
+    plt.scatter(np.array(y_pred).reshape(-1), np.array(y_test).reshape(-1))
     plt.show()
     print(f"mse: {mse} | mae: {mae}")
     
