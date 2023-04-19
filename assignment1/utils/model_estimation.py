@@ -20,9 +20,23 @@ from pathlib import Path
 from tqdm import tqdm
 plt.style.use('seaborn')
 
-def evaluation_mse(mod, X, y_true):
+def evaluation_mse(mod, X, y_true, plot=False, path="figures/", name="test_figure"):
     y_pred = mod.predict(X)
+    if plot:
+        fig, ax = plt.subplots(1,1, figsize=(10,10))
+        ax.scatter(y_pred, y_true)
+        ax.legend()
+        plt.savefig(path + name + ".png")
     return mean_squared_error(y_true, y_pred)
+
+def evaluation_mae(mod, X, y_true, plot=False, path="figures/", name="test_figure"):
+    y_pred = mod.predict(X)
+    if plot:
+        fig, ax = plt.subplots(1,1, figsize=(10,10))
+        ax.scatter(y_pred, y_true)
+        ax.legend()
+        plt.savefig(path + name + ".png")
+    return mean_absolute_error(y_true, y_pred)
 
 def evaluation_model_torch(mod: nn.Module, data, criterion):
     pred = mod(data.x_t)
@@ -35,9 +49,7 @@ def stratified_split_by_id(X_recurrent, X_simple, X_baseline, y):
     id_series = df_ids.apply(lambda x: x.idxmax(), axis = 1)
     
     from sklearn.model_selection import train_test_split, StratifiedShuffleSplit
-    for (train_idx, test_idx) in StratifiedShuffleSplit(n_splits=1, train_size=.8, random_state=42).split(id_series, id_series):
-        pass
-    # train_idx, test_idx = list(train_idx).astype(int), list(test_idx).astype(int)
+    train_idx, test_idx = next(StratifiedShuffleSplit(n_splits=1, train_size=.8, random_state=42).split(id_series, id_series))
 
     X_simple, X_recurrent, X_baseline, y = np.asarray(X_simple), np.asarray(X_recurrent), np.asarray(X_baseline), np.array(y)
     X_simple_train, X_simple_test = X_simple[train_idx], X_simple[test_idx]
@@ -50,27 +62,6 @@ def stratified_split_by_id(X_recurrent, X_simple, X_baseline, y):
 ###### MODEL X #######
 ######################
 
-class LSTM(nn.Module):
-    def __init__(self, in_dim, hid_dim, out_dim, window_size = 5):
-        super(LSTM, self).__init__()
-        self.hid_dim = hid_dim
-        self.window_size = window_size
-
-        self.lstm = nn.LSTM(in_dim, hid_dim)
-        self.linear = nn.Linear(hid_dim, out_dim)
-        self.hidden_cell = (torch.zeros(1,self.window_size,self.hid_dim),
-                            torch.zeros(1,self.window_size,self.hid_dim))
-
-    def forward(self, input_seq):
-        lstm_out, self.hidden_cell = self.lstm(input_seq, self.hidden_cell)
-        predictions = self.linear(lstm_out)
-        self.init_state()
-        return predictions[-1]
-    
-    def init_state(self):
-        self.hidden_cell = (torch.zeros(1,self.window_size,self.hid_dim),
-                            torch.zeros(1,self.window_size,self.hid_dim))
-
 def fit_nn():
     X_recurrent, X_simple, X_baseline, y = load_feature_target_set()
     X_train, _, _, y_train, X_test, _, _, y_test = stratified_split_by_id(X_recurrent, X_simple, X_baseline, y)
@@ -78,93 +69,52 @@ def fit_nn():
 ######################
 ###### MODEL RNN #######
 ######################
-from torch.utils.data import Dataset, DataLoader
-
-class DataSet(Dataset):
-    """ Loads the x,y data into a Dataset instance as torch tensors """
-    def __init__(self, x: np.ndarray, y: np.ndarray):
-        self.x_t = torch.tensor(x, dtype=torch.float32)
-        self.y_t = torch.tensor(y, dtype=torch.float32)
-        
-    def __len__(self,):
-        return len(self.y_t)
-    
-    def __getitem__(self, idx: int):
-        return self.x_t[idx], self.y_t[idx]
-    
-    def split(self, train_index: list, test_index: list):
-        """ Build-in function to split data on given training and testing indices """
-        data_train = DataSet(self.x_t[train_index], self.y_t[train_index])
-        data_test = DataSet(self.x_t[test_index], self.y_t[test_index])
-        return data_train, data_test
+from utils.torch_utils import train_torch_model, cross_validate_torch, LSTM, evaluation_model_torch_numpy_mse, DataSet
     
 def fit_rnn():
     X_recurrent, X_simple, X_baseline, y = load_feature_target_set()
     _, X_train, _, y_train, _, X_test, _, y_test = stratified_split_by_id(X_recurrent, X_simple, X_baseline, y)
-        
     n_features = X_train[0].shape[1]
-    kf = KFold(10, shuffle=True, random_state=52)
-    epochs = 10
-    hid_dim = 50
-    learning_rate = .001
-    batch_size = 10
-
-    train_data = DataSet(X_train, y_train)
-    res_fold_train = {}
-    res_fold_test = {}
     
-    for i, (train_idx, validate_idx) in enumerate(kf.split(train_data.x_t), 1):
-
-        model = LSTM(in_dim=n_features, hid_dim=hid_dim, out_dim=1)
-        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-        criterion = nn.MSELoss()
+    
+    # gridsearch_results = pd.DataFrame(columns = ["lr", "batch_size", "hid_dim", "epochs", "avg_score"])
+    # k = 0
+    # for lr in [0.001]:
+    #     for batch_size in [8, 10, 12]:
+    #         for hid_dim in [50]:
+    #             for epochs in [10, 15, 25]:
+    #                 params = {
+    #                     "lr": lr,
+    #                     "batch_size": batch_size,
+    #                     "hid_dim": hid_dim,
+    #                     "epochs": epochs
+    #                 }
+    #                 fold_scores_train, fold_scores_test = cross_validate_torch(X_train, y_train, verbose = 0, **params)
+    #                 print(params, fold_scores_test)
+    #                 gridsearch_results.loc[k] = [lr, batch_size, hid_dim, epochs, fold_scores_test]
+    #                 k+=1
+    
+    # if cross_val:
+    #     pd.argam
+    # else:
         
-        data_train, data_validate = train_data.split(train_idx, validate_idx)
-        trainloader = DataLoader(data_train, batch_size = batch_size)
-        
-        training_loss_list = []
-        validation_loss_list = []
-        
-        for e in range(epochs):
-            
-            batch_losses = []
-            for batch in trainloader:
-                batch_features: torch.Tensor = batch[0]
-                batch_targets: torch.Tensor = batch[1]
-                
-                # reset gradient optimizer
-                optimizer.zero_grad()
-                
-                # with the batch features, predict the batch targets
-                output = model(batch_features)
-                
-                # compute the loss and .backward() computes the gradient of the loss function
-                loss = criterion(output, batch_targets)
-                loss.backward()
-                
-                batch_losses.append(loss.item())
-                
-                # update parameters (something like: params += -learning_rate * gradient)
-                optimizer.step()
-                
-            training_loss = np.mean(batch_losses)
-            validation_loss = evaluation_model_torch(model, data_validate, criterion)
-            
-            print(f"Fold {i} - Epoch {e+1} | training_loss: {training_loss} | validation_loss: {validation_loss}")
-
-            training_loss_list.append(training_loss)
-            validation_loss_list.append(validation_loss)
-        res_fold_train[i] = training_loss_list
-        res_fold_test[i] = validation_loss_list
-    # for key in res_fold_train:
-    #     plt.plot(res_fold_train[key], label = str(key))
-    # plt.legend()
-    # plt.show()
-    # for key in res_fold_test:
-    #     plt.plot(res_fold_test[key], label = str(key))
-    # plt.legend()
-    # plt.show()
-
+    
+    data_train = DataSet(X_train, y_train)
+    data_test = DataSet(X_test, y_test)
+    
+    model = LSTM(in_dim=n_features, hid_dim=50, out_dim=1)
+    model, train_losses, test_losses = train_torch_model(
+        model = model,
+        optimizer = torch.optim.Adam(model.parameters(), lr=.001),
+        criterion = nn.MSELoss(),
+        data_train = data_train,
+        data_validate = data_test,
+        epochs = 50
+    )
+    best_loss_test = test_losses[-1]
+    print(f"RNN - Test - MSE loss = {best_loss_test}")
+    # mse = evaluation_model_torch_numpy_mse(model, data_test)
+    # print(f"mse testset: {mse}")
 
 ######################
 ###### MODEL XGB #######
@@ -179,20 +129,17 @@ def fit_xgb():
 ###### MODEL LGB #######
 ######################
 
-def evaluation_mae(mod, X, y_true):
-    y_pred = mod.predict(X)
-    return mean_absolute_error(y_true, y_pred)
-
 def fit_lgb():
     X_recurrent, X_simple, X_baseline, y = load_feature_target_set()
-    X_train, _, _, y_train, X_test, _, _, y_test = stratified_split_by_id(X_recurrent, X_simple, X_baseline, y)
+    columns = X_simple.columns
+    X_train, _, _, y_train, X_test, _, _, y_test = stratified_split_by_id(X_recurrent, np.array(X_simple), X_baseline, y)
     print("Shape of training features: ", X_train.shape)
     print("Shape of testing features: ", X_test.shape)
     
-    print("Performing Kfolds for LGMBoost")
+    print("Performing Kfolds for LGMBoost ...")
     param_grid = {
         # "num_leaves": [],
-        "learning_rate": [0.1, 0.05, 0.01]
+        "learning_rate": [0.1, 0.05]
     }
     mod = lgb.LGBMModel(objective="regression")
     gs = GridSearchCV(
@@ -200,15 +147,15 @@ def fit_lgb():
         param_grid = param_grid,
         cv = KFold(10, shuffle=True),
         scoring = evaluation_mse,
-        verbose=10
+        verbose=0
     )
-    gs.fit(X_train, y_train)
-    
-    import matplotlib.pyplot as plt
+    gs.fit(pd.DataFrame(columns = columns, data = X_train), y_train)
     y_pred = gs.predict(X_test)
-    plt.hist(np.array(y_pred).reshape(-1) - np.array(y_test).reshape(-1))
-    plt.show()
-    print("results: ", gs.best_score_, gs.best_params_)
+    # lgb.plot_importance(gs.best_estimator_, )
+    # plt.show()
+    mse = mean_squared_error(y_test, y_pred)
+    print(f"LGBM - GridSearch - Best params = {gs.best_params_} - Best avg score = {gs.best_score_}")
+    print(f"LGBM - Test - MSE loss = {mse}")
 
 ######################
 ###### MODEL z #######
@@ -245,12 +192,12 @@ def fit_baseline():
     mse = mean_squared_error(y_test, y_pred)
     mae = mean_absolute_error(y_test, y_pred)
     
-    import matplotlib.pyplot as plt
-    plt.hist(np.array(y_test).reshape(-1) - np.array(y_pred).reshape(-1))
-    plt.show()
-    plt.scatter(np.array(y_pred).reshape(-1), np.array(y_test).reshape(-1))
-    plt.show()
-    print(f"mse: {mse} | mae: {mae}")
+    # import matplotlib.pyplot as plt
+    # plt.hist(np.array(y_test).reshape(-1) - np.array(y_pred).reshape(-1))
+    # plt.show()
+    # plt.scatter(np.array(y_pred).reshape(-1), np.array(y_test).reshape(-1))
+    # plt.show()
+    print(f"Baseline - Test - MSE loss = {mse} | mae: {mae}")
     
 #######################
 ## GENERAL FUNCTIONS ##

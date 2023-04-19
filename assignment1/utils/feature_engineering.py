@@ -198,13 +198,17 @@ def df_to_features_and_targets(args, df: pd.DataFrame):
             agg_dict = {}
             for column in columns_to_agg_for:
                 agg_dict[column] = [np.mean, np.std]
-            agg_data = np.array(df_recurrent.apply(agg_dict).values).reshape(-1)
+                
+            df_agg = df_recurrent.apply(agg_dict)
+            agg_data = np.array(df_agg.values).reshape(-1)
+            X_simple_columns = ["mean_" + c for c in df_agg.columns] + ["std_" + c for c in df_agg.columns]
             X_simple.append(agg_data)
                 
             # store target mood (same for recurrent and simple)
             y.append(target_mood)
             
-    X_simple = np.array(X_simple)
+    X_simple = pd.DataFrame(columns = X_simple_columns, data = np.array(X_simple))
+    # X_simple = np.array(X_simple)
     X_baseline = np.array(X_baseline).reshape(-1)
     
     return X_simple, X_recurrent, X_baseline, y
