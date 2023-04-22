@@ -4,11 +4,11 @@ from utils.load import load_raw_data_csv
 from sklearn.preprocessing import MinMaxScaler
 
 def clean_data():
-    """ roept alle functies hieronder aan """
-    
-    # clean data
+    """ main cleaning function which calls all seperate function """
+
     print("Loading raw data from csv")
     df = load_raw_data_csv()
+    
     print("Removing outliers to nan ...")
     df = remove_outliers(df)
     
@@ -20,9 +20,6 @@ def clean_data():
     #     nan_count = val.isna().sum()
     #     nan_rel = nan_count / len(val)
     #     print(c, nan_count, nan_rel)
-        
-    # print("Normalizing data")
-    # normalize_data(df)
 
     store_processed_data(df)
 
@@ -51,13 +48,16 @@ def remove_outliers(df: pd.DataFrame):
     # klopt deze lijst
     columns_to_remove_outliers = [column for column in df.variable.unique() if "appCat." in column or column in ["screen"]]
     columns_to_not_remove_outliers = set(df.variable.unique()) - set(columns_to_remove_outliers)
-    
+    print(f"Removing outliers, except for: {columns_to_not_remove_outliers}")
     data_frames = []
     for column in columns_to_remove_outliers:
         # outlier for
         df_var = df[df.variable == column]
         df_var["value"] = np.log(df_var.value)
-        data_frames.append(iqr_correction(df_var))
+        # data_frames.append(iqr_correction(df_var))
+        df_var = iqr_correction(df_var)
+        # df_var["value"] = df_var["value"].apply(np.exp)
+        data_frames.append(df_var)
         
     for column in columns_to_not_remove_outliers:
         data_frames.append(df[df.variable == column])

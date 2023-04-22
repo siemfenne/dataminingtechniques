@@ -32,7 +32,9 @@ om te varieren in de hele pipeline:
 - feature selection misschien mee spelen
 
 TODO:
-- stratified split werkend krijgen
-- functies om rnn te trainen + evaluation (evaluate(model, data, criterion)))
-- store figures voor alle modellen (histogram van errors of scatter plot zoiets)
-- 
+- in df_to_features_and_targets, plot_pacf voor iedere user voor mood
+- RNN fit optimaliseren (cross validations, epochs, hidden dimensions, etc.), slechte performence
+- scatter plot van predictions opslaan
+- distribution figuur mood
+- nan waardes na dag aggregatie plotten (?)
+- sum bij dagdeel toevoegen (extra dataframe groupby [id, date, dagdeel]), mergen op bestaande df

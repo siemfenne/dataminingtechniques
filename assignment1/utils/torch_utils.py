@@ -29,28 +29,21 @@ class DataSet(Dataset):
         data_train = DataSet(self.x_t[train_index], self.y_t[train_index])
         data_test = DataSet(self.x_t[test_index], self.y_t[test_index])
         return data_train, data_test
-    
 
 class LSTM(nn.Module):
-    def __init__(self, in_dim, hid_dim, out_dim, window_size = 5):
+    def __init__(self, in_dim, hid_dim, out_dim):
         super(LSTM, self).__init__()
         self.hid_dim = hid_dim
-        self.window_size = window_size
-
         self.lstm = nn.LSTM(in_dim, hid_dim)
         self.linear = nn.Linear(hid_dim, out_dim)
-        self.hidden_cell = (torch.zeros(1,self.window_size,self.hid_dim),
-                            torch.zeros(1,self.window_size,self.hid_dim))
 
-    def forward(self, input_seq):
-        lstm_out, self.hidden_cell = self.lstm(input_seq, self.hidden_cell)
-        predictions = self.linear(lstm_out)
-        self.init_state()
-        return predictions[:, -1]
-    
-    def init_state(self):
-        self.hidden_cell = (torch.zeros(1,self.window_size,self.hid_dim),
-                            torch.zeros(1,self.window_size,self.hid_dim))
+    def forward(self, inputs):
+        h0 = torch.zeros(1, inputs.size(1), self.hid_dim).to(inputs.device)
+        c0 = torch.zeros(1, inputs.size(1), self.hid_dim).to(inputs.device)
+        lstm_out, self.hidden_cell = self.lstm(inputs, (h0, c0))
+        last_output = lstm_out[:, -1, :]
+        predictions = self.linear(last_output)
+        return predictions
         
 def evaluation_model_torch_numpy_mse(model: nn.Module, data_validate: DataSet):
     """ Evaluate the mse of the model. mean_squared_error has some small numerical differences with torch mse """
@@ -58,9 +51,15 @@ def evaluation_model_torch_numpy_mse(model: nn.Module, data_validate: DataSet):
     y_true = data_validate.y_t.detach().numpy().reshape(-1,1)
     return mean_squared_error(y_true, y_pred)
 
-def cross_validate_torch(X_train, y_train, verbose = 0, lr = .001, batch_size = 10, hid_dim = 50, epochs = 10):
+def evaluation_model_torch_numpy_mae(model: nn.Module, data_validate: DataSet):
+    """ Evaluate the mse of the model. mean_squared_error has some small numerical differences with torch mse """
+    y_pred = model(data_validate.x_t).detach().numpy().reshape(-1,1)
+    y_true = data_validate.y_t.detach().numpy().reshape(-1,1)
+    return mean_absolute_error(y_true, y_pred)
+
+def cross_validate_torch(X_train, y_train, verbose = 0, lr = .001, batch_size = 10, hid_dim = 50, epochs = 20, window_size = 5, cv = KFold(n_splits=10, shuffle=True)):
     n_features = X_train[0].shape[1]
-    kf = KFold(10, shuffle=True, random_state=52)
+    kf = cv
 
     train_data = DataSet(X_train, y_train)
     fold_mse_train = []
@@ -69,7 +68,7 @@ def cross_validate_torch(X_train, y_train, verbose = 0, lr = .001, batch_size = 
     for i, (train_idx, validate_idx) in enumerate(kf.split(train_data.x_t), 1):
 
         # initialize model, optimizer and criterion
-        model = LSTM(in_dim=n_features, hid_dim=hid_dim, out_dim=1)
+        model = LSTM(in_dim=n_features, hid_dim=hid_dim, out_dim=1, window_size=window_size)
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
         criterion = nn.MSELoss()
 

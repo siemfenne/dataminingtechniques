@@ -5,6 +5,7 @@ from argparse import Namespace
 from sklearn.metrics import mean_squared_error, mean_absolute_percentage_error
 from sklearn.preprocessing import MinMaxScaler
 import pickle as pkl
+from tqdm import tqdm
 
 def feature_engineering(args: Namespace):
     # load cleaned data
@@ -31,15 +32,16 @@ def feature_engineering(args: Namespace):
     df = userid_to_dummies(df)
     df = select_important_features_by_univariate_selection(args, df)
     
-    # for id in df.id.unique():
-    #     df_sort = df[df.id==id].sort_values(by="date")
-    #     r = df_sort.date.diff()
-    #     print(id)
-    #     print(r.value_counts())
+    X_simple, X_recurrent, X_baseline, y, ids = df_to_features_and_targets(args, df)
     
-    X_simple, X_recurrent, X_baseline, y = df_to_features_and_targets(args, df)
-
-    store_features_and_targets(X_simple, X_recurrent, X_baseline, y, path = "data/")
+    normalize_features = True
+    if normalize_features:
+        print("Normalizing data (recurrent and simple) ...")
+        X_simple = normalize_data(X_simple)
+        X_r_norm = normalize_data(pd.concat(X_recurrent))
+        X_recurrent = [X_r_norm[i:i+args.agg_window].reset_index(drop=True) for i in range(len(X_recurrent))]
+        # baseline not reshaped (lagged value == prediction)
+    store_features_and_targets(X_simple, X_recurrent, X_baseline, y, ids, path = "data/")
 
 def add_categorical_for_part_of_day(df: pd.DataFrame, window: int = 6):
     
@@ -58,15 +60,18 @@ def add_categorical_for_part_of_day(df: pd.DataFrame, window: int = 6):
         include_lowest=True
     )
     df = pd.get_dummies(df, columns=["time_window"])
-    # del df["time_window"]
     
     # aggregate part of day to days, using count
     df_time_window = pd.pivot_table(df, values=["time_window_" + l for l in labels], index=['id', 'date'],
                             columns=['variable'], aggfunc=['count'], fill_value=0)
+    
 
     # aggregate attributes to days, using both sum and mean
     df_attr = pd.pivot_table(df, values='value', index=['id', 'date'],
                             columns=['variable'], aggfunc=[np.sum, np.mean], fill_value=np.nan)
+    # # columns_to_take_log_for = list(set(df_attr.columns) - set(["id", "date", "mood", "circumplex.arousal", "circumplex.valence", "activity", "sms", "call"]))
+    # columns_to_take_log_for = [c for c in df_attr.columns if "appCat." in c or "screen" in c]
+    # df_attr[columns_to_take_log_for] = np.log(df_attr[columns_to_take_log_for])
     
     for column in df_attr["sum"].columns:
         if column in ["mood", "circumplex.arousal", "circumplex.valence"]:
@@ -75,7 +80,6 @@ def add_categorical_for_part_of_day(df: pd.DataFrame, window: int = 6):
             del df_attr["mean", column]
     
     df_attr.columns = [c[0] + "_" + c[1] for c in df_attr.columns]
-    # df_attr.rename(columns="_".join, inplace=True)
     df_time_window.columns = list(df_time_window["count"].columns)
     df_time_window.rename(columns="_".join, inplace=True)
     df = pd.merge(df_attr, df_time_window, on=["date", "id"])
@@ -88,6 +92,8 @@ def missing_value_interpolation(df: pd.DataFrame):
     columns_to_fill_zero = [c for c in df.columns if "sum_" in c]
     df[columns_to_fill_zero] = df[columns_to_fill_zero].fillna(0)
     columns_to_impute_otherwise = set([c for c in df.columns if "sum_" in c or "mean_" in c]) - set(columns_to_fill_zero)
+    print(f"Imputing missing values with 0, except for columns: {columns_to_impute_otherwise}")
+    print(f"Imputing missing values through KNN for columns: {columns_to_impute_otherwise}")
     
     # store copy of moods so targets are not interpolated
     moods = df.copy()["mean_mood"]
@@ -104,6 +110,10 @@ def missing_value_interpolation(df: pd.DataFrame):
     from sklearn.model_selection import KFold, GridSearchCV
     
     def own_scorer(mod, features, targets):
+        """ 
+        The scoring metric for the KNN gridsearch.
+        GridSearchCV maximizes the loss function, therefore this function returns negative MSE
+        """
         pred = mod.predict(features)
         # return -mean_absolute_percentage_error(targets, pred)
         return -mean_squared_error(targets, pred)
@@ -113,16 +123,16 @@ def missing_value_interpolation(df: pd.DataFrame):
         test = df_norm[df_norm[column].isna()]
         
         features = set(df.columns) - set(list(columns_to_impute_otherwise) + ["date", "id"])
-          
+        
         mod = GridSearchCV(
             estimator = KNeighborsRegressor(),
             cv = KFold(10, shuffle=True, random_state=42),
-            param_grid = {"n_neighbors": [7,12, 15, 20, 25, 30], "weights": ["uniform", "distance"]},
+            param_grid = {"n_neighbors": [2, 4, 8, 16, 32, 48], "weights": ["uniform", "distance"]},
             scoring = own_scorer,
             error_score="raise"
         )
         mod.fit(train[features].values, train[column].values)
-        print(column, mod.best_params_, mod.best_score_)
+        print(f"KNN result: {column} - best_params: {mod.best_params_} - best_score: {mod.best_score_}")
         pred = mod.predict(test[features])
         df.loc[pd.isna(df[column]), column] = pred
     
@@ -130,39 +140,65 @@ def missing_value_interpolation(df: pd.DataFrame):
     return df
 
 def userid_to_dummies(df: pd.DataFrame):
+    """ Drops the user id column and adds user id dummies to the dataframe """
+    print("User id column to dummies ...")
     ids = df["id"]
     df = pd.get_dummies(data=df, columns=["id"])
     df["id"] = ids
     return df
 
 def select_important_features_by_univariate_selection(args, df):
+    """ 
+    For a list of columns (exclude the original target column + some other columns), perform F regression and select the most important features.
+    These features are used later on in the temporal data and/or used for further aggregation
+    """
     target_column = ["mean_mood_initial"]
-    exclude_from_selection = ["date"] + [c for c in df.columns if "time_window" in c or "id" in c]
+    # exclude_from_selection = ["date"] + [c for c in df.columns if "time_window" in c or "id" == c] # exclude id itself, include dummies in SelectKBest
+    exclude_from_selection = ["date", "id"]
     feature_columns = [c for c in df.columns if c not in target_column and c not in exclude_from_selection]
     features = df[feature_columns]
-    print("Selecting features on: \n", feature_columns)
     
+    print("Selecting most important features out of:\n", feature_columns)
     targets = df["mean_mood_initial"].shift(-1)
     features = features[targets.notna()]
     targets = targets.dropna()
     from sklearn.feature_selection import SelectPercentile, SelectKBest, f_regression
     s = SelectKBest(f_regression, k = args.k_features)
-    res = s.fit_transform(features, targets)
+    s.fit(features, targets)
     selected_features = features.columns[s.get_support(indices=True)]
-    print("Selected features are: \n", selected_features)
+    print(f"Best {args.k_features} features are:\n", selected_features)
     
     # return selected features + targets and date
     return df[list(selected_features) + exclude_from_selection + target_column]
 
 def df_to_features_and_targets(args, df: pd.DataFrame):
-
+    """ 
+    For each user, we iterate through the date-ordered data for each user:
+    - for each data point (the target), we also select the desired feature window from (t-1 to t-{window_size})
+    - check if there are no missing values present, i.e. no date gaps
+    - drop date columns (unsuitable as features for the model) and some other irrelevant columns
+    - store these temporal features 
+    - aggregate these temporal features to make suitable for lightGBM for example, by
+        - mean, std, min, max, etc.
+    - store this aggregated result as well
+    - the baseline features are the avg mood at t-1
+    - return temporal, simple, baseline features + the target (mean mood of today)
+    """
     X_simple = []
     X_recurrent = []
     X_baseline = []
+    ids = []
     y = []
-    
-    for id in df.id.unique():
+
+    print("Transforming data to (temporal) features and targets ...")
+    for id in tqdm(df.id.unique()):
         df_id = df[df.id == id]
+        
+        # from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+        # import matplotlib.pyplot as plt
+        # plot_pacf(df_id["mean_mood"])
+        # plt.show()
+        
         for i, row in df_id.iterrows():
             target_row = df_id.loc[i]
             target_mood = target_row["mean_mood_initial"]
@@ -195,44 +231,41 @@ def df_to_features_and_targets(args, df: pd.DataFrame):
             #     print(c)
             columns_to_agg_for = [c for c in df_simple.columns if c not in ["date", "id", "mean_mood_initial"]]
         
+            def wm(s: pd.Series):
+                s = s.values
+                return np.average(s, weights = [1+1 for i in range(len(s))])
+        
             agg_dict = {}
             for column in columns_to_agg_for:
-                agg_dict[column] = [np.mean, np.std]
+                agg_dict[column] = [np.mean, np.std, np.max, np.min, wm]
                 
             df_agg = df_recurrent.apply(agg_dict)
             agg_data = np.array(df_agg.values).reshape(-1)
-            X_simple_columns = ["mean_" + c for c in df_agg.columns] + ["std_" + c for c in df_agg.columns]
+            
+            def prefix_columns(prefix, col: list):
+                return [prefix + "_" + c for c in df_agg.columns]
+            
+            X_simple_columns = prefix_columns("mean", df_agg.columns) + \
+                prefix_columns("std", df_agg.columns) + \
+                prefix_columns("max", df_agg.columns) + \
+                prefix_columns("min", df_agg.columns) + \
+                prefix_columns("wm", df_agg.columns)
             X_simple.append(agg_data)
                 
             # store target mood (same for recurrent and simple)
             y.append(target_mood)
             
+            # store id, used for stratified split later on
+            ids.append(id)
+            
     X_simple = pd.DataFrame(columns = X_simple_columns, data = np.array(X_simple))
     # X_simple = np.array(X_simple)
     X_baseline = np.array(X_baseline).reshape(-1)
     
-    return X_simple, X_recurrent, X_baseline, y
-            
-def remove_days_with_no_mood(df):
-    return df[df.mood.count > 0]
-    
-def find_consecutive_moods(df, window = 5):
-    start_end_indices = []
-    return start_end_indices
-    
-def aggregate_time_windows(df, args):
-    
-    features = pd.DataFrame()
-    targets = pd.DataFrame()
-    
-    for i in range(args.window, len(df)-1):
-        if df.loc[i]["mean_mood"].isna().value:
-            continue
-        
-    return features, targets
+    return X_simple, X_recurrent, X_baseline, y, ids
 
 def normalize_data(df: pd.DataFrame):
-    columns_to_normalize = set(df.columns) - set(["mean_mood", "mean_circumplex.arousal", "mean_circumplex.valence"])
+    columns_to_normalize = set(df.columns) - set([c for c in df.columns if "id_" in c]) - set(["date", "id", "mean_mood_initial", "mean_mood"])
     # columns_to_normalize = [column for column in df.variable.unique() if "appCat." in column or column in ["screen", "activity"]]
     scaler = MinMaxScaler()
     
@@ -241,9 +274,8 @@ def normalize_data(df: pd.DataFrame):
         if len(values) > 0:
             df[column] = scaler.fit_transform(values.values.reshape(-1,1))
     return df
-
     
-def store_features_and_targets(X_simple: np.ndarray, X_recurrent: list, X_baseline: np.ndarray, y: list, filename: str = "data_features", path: str = "data/"):
+def store_features_and_targets(X_simple: np.ndarray, X_recurrent: list, X_baseline: np.ndarray, y: list, ids: list, filename: str = "data_features", path: str = "data/"):
     
     with open(path + 'x_recurrent.pkl', 'wb') as f:
         pkl.dump(X_recurrent, f)
@@ -251,27 +283,29 @@ def store_features_and_targets(X_simple: np.ndarray, X_recurrent: list, X_baseli
         pkl.dump(X_simple, f)
     with open(path + 'x_baseline.pkl', 'wb') as f:
         pkl.dump(X_baseline, f)
+    with open(path + 'ids.pkl', 'wb') as f:
+        pkl.dump(ids, f)
     with open(path + 'y.pkl', 'wb') as f:
         pkl.dump(y, f)
     
-agg_config = {
-    "appCat.builtin": [],
-    "appCat.communication": [],
-    "appCat.entertainment": [],
-    "appCat.finance": [],
-    "appCat.game": [],
-    "appCat.office": [],
-    "appCat.other": [],
-    "appCat.social": [],
-    "appCat.travel": [],
-    "appCat.unknown": [],
-    "appCat.utilities": [],
-    "appCat.weather": [],
-    "screen": [],
-    "call": [],
-    "sms": [],
-    "activity": [],
-    "circumplex.arousal": [],
-    "circumplex.valence": [],
-    "mood": [],
-}
+# agg_config = {
+#     "appCat.builtin": [],
+#     "appCat.communication": [],
+#     "appCat.entertainment": [],
+#     "appCat.finance": [],
+#     "appCat.game": [],
+#     "appCat.office": [],
+#     "appCat.other": [],
+#     "appCat.social": [],
+#     "appCat.travel": [],
+#     "appCat.unknown": [],
+#     "appCat.utilities": [],
+#     "appCat.weather": [],
+#     "screen": [],
+#     "call": [],
+#     "sms": [],
+#     "activity": [],
+#     "circumplex.arousal": [],
+#     "circumplex.valence": [],
+#     "mood": [],
+# }

@@ -2,6 +2,7 @@ import argparse
 from utils.data_cleaning import clean_data
 from utils.feature_engineering import feature_engineering
 from utils.model_estimation import model_functions
+from utils.functions import print_section
 
 import warnings
 warnings.simplefilter('ignore')
@@ -23,9 +24,13 @@ if __name__ == "__main__":
     
     # redo cleaning and/or feature engineering
     if "c" in args.steps:
+        print_section("CLEANING DATA")
         clean_data()
     if "f" in args.steps or "c" in args.steps:
+        print_section("FEATURE ENGINEERING")
         feature_engineering(args)
+        
     # cross validate, train and evaluate out-of-sample each model
+    print_section("TRAINING AND EVALUATING MODELS")
     for model in args.models:
-        model_functions[model]()
+        model_functions[model](args)
