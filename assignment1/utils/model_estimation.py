@@ -3,15 +3,16 @@ import pandas as pd
 from sklearn.svm import SVR
 from sklearn.model_selection import GridSearchCV, KFold
 from sklearn.metrics import mean_absolute_error, mean_squared_error
-from sklearn.model_selection import train_test_split
 import lightgbm as lgb
 from utils.load import load_feature_target_set
 import torch
 import torch.nn as nn
-from torch.autograd import Variable
 import matplotlib.pyplot as plt
-from tqdm import tqdm
 plt.style.use('seaborn')
+
+###############################
+###### HELPER FUNCTIONS #######
+###############################
 
 def evaluation_mse(mod, X, y_true, plot=False, path="figures/", name="test_figure"):
     y_pred = mod.predict(X)
@@ -20,7 +21,7 @@ def evaluation_mse(mod, X, y_true, plot=False, path="figures/", name="test_figur
         ax.scatter(y_pred, y_true)
         ax.legend()
         plt.savefig(path + name + ".png")
-    return mean_squared_error(y_true, y_pred)
+    return -mean_squared_error(y_true, y_pred)
 
 def evaluation_mae(mod, X, y_true, plot=False, path="figures/", name="test_figure"):
     y_pred = mod.predict(X)
@@ -48,9 +49,9 @@ def stratified_split_by_id(X_recurrent, X_simple, X_baseline, y, ids: list):
     y_train, y_test = y[train_idx], y[test_idx]
     return X_simple_train, X_recurrent_train, X_baseline_train, y_train, X_simple_test, X_recurrent_test, X_baseline_test, y_test
 
-######################
+########################
 ###### MODEL RNN #######
-######################
+########################
 from utils.torch_utils import train_torch_model, cross_validate_torch, LSTM, evaluation_model_torch_numpy_mse, evaluation_model_torch_numpy_mae, DataSet
     
 def fit_rnn(args):
@@ -58,17 +59,17 @@ def fit_rnn(args):
     _, X_train, _, y_train, _, X_test, _, y_test = stratified_split_by_id(X_recurrent, X_simple, X_baseline, y, ids)
     n_features = X_train[0].shape[1]
     
-    gridsearch = True
+    gridsearch = False
     
     if gridsearch == True:
         param_names = ["lr", "batch_size", "hid_dim", "epochs"]
         columns = param_names + ["avg_score"]
         gridsearch_results = pd.DataFrame(columns = columns)
         k = 0
-        for lr in [0.001]:
+        for lr in [0.005]:
             for batch_size in [10]:
-                for hid_dim in [50]:
-                    for epochs in [30]:
+                for hid_dim in [64]:
+                    for epochs in [10]:
                         params = {
                             "lr": lr,
                             "batch_size": batch_size,
@@ -90,9 +91,9 @@ def fit_rnn(args):
     else:
         # default parameters
         lr = .001
-        batch_size = 1
-        hid_dim = 50
-        epochs = 15
+        batch_size = 10
+        hid_dim = 64
+        epochs = 10
     
     data_train = DataSet(X_train, y_train)
     data_test = DataSet(X_test, y_test)
@@ -111,37 +112,41 @@ def fit_rnn(args):
     
     mae = evaluation_model_torch_numpy_mae(model, data_test)
     print(f"RNN - Test - MSE loss = {best_loss_test} - MAE loss = {mae}")
-
-######################
-###### MODEL XGB #######
-######################
-def fit_xgb(args):
-    _, X, _, y, ids = load_feature_target_set()
-    print("Loaded data for XGB ... ")
     
-    print("Performing Kfolds for XGBoost")
-    
-######################
+########################
 ###### MODEL LGB #######
-######################
+########################
 
 def fit_lgb(args):
     X_recurrent, X_simple, X_baseline, y, ids = load_feature_target_set()
     columns = X_simple.columns
     X_train, _, _, y_train, X_test, _, _, y_test = stratified_split_by_id(X_recurrent, np.array(X_simple), X_baseline, y, ids)
-    param_grid = {
-        # "num_leaves": [],
-        "learning_rate": [0.1],
-        # "max_depth": [None, 5, 10],
-        # "num_leaves": [100, 40, 65],
-        # "n_estimators": [20, 50, 100, 200]
-        
-    }
+    
+    gridsearch = True
+    if gridsearch:
+        param_grid = {
+            # "num_leaves": [],
+            "learning_rate": [0.12, 0.08, 0.04, 0.02],
+            "max_depth": [None, 1, 2, 4],
+            "num_leaves": [20, 40, 80, 120],
+            "n_estimators": [40, 80, 120],
+            "min_split_gain": [0, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2]
+            
+        }
+    else:
+        param_grid = {
+            # "num_leaves": [],
+            "learning_rate": [0.08,],
+            "max_depth": [1,],
+            "num_leaves": [20,],
+            "n_estimators": [80,]
+            
+        }
     mod = lgb.LGBMModel(objective="regression")
     gs = GridSearchCV(
         estimator = mod,
         param_grid = param_grid,
-        cv = KFold(10, shuffle=True),
+        cv = KFold(5, shuffle=True, random_state=52),
         scoring = evaluation_mse,
         verbose=0
     )
@@ -152,33 +157,11 @@ def fit_lgb(args):
     mse = mean_squared_error(y_test, y_pred)
     print(f"LGBM - GridSearch - Best params = {gs.best_params_} - Best avg score = {gs.best_score_}")
     print(f"LGBM - Test - MSE loss = {mse}")
-
-######################
-###### MODEL z #######
-######################
-def fit_svr(args, random_state=42):
-    
-    _, X_train, _, y_train, _, X_test, _, y_test = stratified_split_by_id(load_feature_target_set())    
-    param_grid = {
-        "C": [1e1, 1e0, 1e-1, 1e-2],
-    }
-    grid_search = GridSearchCV(estimator=SVR(), cv=KFold(n_splits=5), param_grid=param_grid)
-    grid_search.fit(X_train, y_train)
-    best_params, scores = grid_search.best_params_
-    
-    mse, mae = evaluate_model(grid_search, X_test, y_test)
-    
-    return {
-        "best_params": best_params,
-        "scores": scores,
-        "mse": mse,
-        "mae": mae
-    }
     
     
-######################
-###### MODEL z #######
-######################
+#############################
+###### MODEL BASELINE #######
+#############################
 def fit_baseline(args):
     """ the baseline model is an AR(1) with coefficient = 1 """
     X_recurrent, X_simple, X_baseline, y, ids = load_feature_target_set()
@@ -187,7 +170,7 @@ def fit_baseline(args):
     
     mse = mean_squared_error(y_test, y_pred)
     mae = mean_absolute_error(y_test, y_pred)
-    print(f"Baseline - Test - MSE loss = {mse} | MAE loss = {mae}")
+    print(f"Baseline - Test - MSE loss = {mse} - MAE loss = {mae}")
     
 #######################
 ## GENERAL FUNCTIONS ##
@@ -199,8 +182,6 @@ def evaluate_model(model, X_test, y_test):
     return mse, mae
 
 model_functions = {
-    "xgb": fit_xgb,
-    "svr": fit_svr,
     "baseline": fit_baseline,
     "lgb": fit_lgb,
     "rnn": fit_rnn,

@@ -36,7 +36,7 @@ def feature_engineering(args: Namespace):
     
     normalize_features = True
     if normalize_features:
-        print("Normalizing data (recurrent and simple) ...")
+        print("Normalizing features (only recurrent and simple) ...")
         # normalize non-temporal data
         X_simple = normalize_data(X_simple)
         
@@ -227,31 +227,34 @@ def df_to_features_and_targets(args, df: pd.DataFrame):
             X_baseline.append(df_recurrent.iloc[-1]["mean_mood"])
             
             # the X_simple part
-            df_simple = df_in_window.copy()
-            # for c in df_simple.columns:
-            #     print(c)
-            columns_to_agg_for = [c for c in df_simple.columns if c not in ["date", "id", "mean_mood_initial"]]
-        
+            df_simple = df_in_window.copy().reset_index(drop=True)
+            df_simple = df_simple.drop(["id", "date", "mean_mood_initial"], axis = 1)
+            
+            columns_to_agg_for_continuous = [c for c in df_simple.columns if "id_" not in c]
+            columns_to_store_last = list(set([c for c in df_simple.columns]) - set(columns_to_agg_for_continuous))
+
             def wm(s: pd.Series):
                 s = s.values
                 return np.average(s, weights = [1+1 for i in range(len(s))])
         
+            def select_first(s: pd.Series):
+                return s.values[0]
+        
             agg_dict = {}
-            for column in columns_to_agg_for:
+            for column in columns_to_agg_for_continuous:
                 agg_dict[column] = [np.mean, np.std, np.max, np.min, wm]
+            for column in columns_to_store_last:
+                agg_dict[column] = [select_first]
                 
-            df_agg = df_recurrent.apply(agg_dict)
-            agg_data = np.array(df_agg.values).reshape(-1)
+            # apply the aggregation dict and convert the data to a single row
+            df_agg = df_simple \
+                .apply(agg_dict).reset_index() \
+                .pivot(columns="index").sum(skipna=True, min_count=1).dropna(0)
+            agg_array = np.array(df_agg.values).reshape(-1)
+            X_simple_columns = [c[0] + "_" + c[1] for c in df_agg.index]
             
-            def prefix_columns(prefix, col: list):
-                return [prefix + "_" + c for c in df_agg.columns]
-            
-            X_simple_columns = prefix_columns("mean", df_agg.columns) + \
-                prefix_columns("std", df_agg.columns) + \
-                prefix_columns("max", df_agg.columns) + \
-                prefix_columns("min", df_agg.columns) + \
-                prefix_columns("wm", df_agg.columns)
-            X_simple.append(agg_data)
+            # store simple data
+            X_simple.append(agg_array)
                 
             # store target mood (same for recurrent and simple)
             y.append(target_mood)
@@ -259,6 +262,10 @@ def df_to_features_and_targets(args, df: pd.DataFrame):
             # store id, used for stratified split later on
             ids.append(id)
             
+    # print the final column feature for simple
+    print("The final features for recurrent:\n", X_recurrent[0].columns)
+    print("The final features for simple:\n", X_simple_columns)
+    
     X_simple = pd.DataFrame(columns = X_simple_columns, data = np.array(X_simple))
     # X_simple = np.array(X_simple)
     X_baseline = np.array(X_baseline).reshape(-1)
@@ -295,25 +302,3 @@ def check_for_nan(df: pd.DataFrame):
         nan_count = np.sum(df[column].isna())
         if nan_count > 0:
             print(f"column: {column} - nan_count: {nan_count} - total val. present: {len(df[column])}")
-    
-# agg_config = {
-#     "appCat.builtin": [],
-#     "appCat.communication": [],
-#     "appCat.entertainment": [],
-#     "appCat.finance": [],
-#     "appCat.game": [],
-#     "appCat.office": [],
-#     "appCat.other": [],
-#     "appCat.social": [],
-#     "appCat.travel": [],
-#     "appCat.unknown": [],
-#     "appCat.utilities": [],
-#     "appCat.weather": [],
-#     "screen": [],
-#     "call": [],
-#     "sms": [],
-#     "activity": [],
-#     "circumplex.arousal": [],
-#     "circumplex.valence": [],
-#     "mood": [],
-# }

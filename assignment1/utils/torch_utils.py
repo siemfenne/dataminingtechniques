@@ -4,11 +4,7 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 from torch.utils.data import Dataset, DataLoader
-import sys
 import matplotlib.pyplot as plt
-from tqdm import tqdm
-from pathlib import Path
-from tqdm import tqdm
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 plt.style.use('seaborn')
 
