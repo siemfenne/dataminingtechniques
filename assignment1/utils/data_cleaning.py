@@ -54,10 +54,7 @@ def remove_outliers(df: pd.DataFrame):
         # outlier for
         df_var = df[df.variable == column]
         df_var["value"] = np.log(df_var.value)
-        # data_frames.append(iqr_correction(df_var))
-        df_var = iqr_correction(df_var)
-        # df_var["value"] = df_var["value"].apply(np.exp)
-        data_frames.append(df_var)
+        data_frames.append(iqr_correction(df_var))
         
     for column in columns_to_not_remove_outliers:
         data_frames.append(df[df.variable == column])

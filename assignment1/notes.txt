@@ -37,4 +37,6 @@ TODO:
 - scatter plot van predictions opslaan
 - distribution figuur mood
 - nan waardes na dag aggregatie plotten (?)
-- sum bij dagdeel toevoegen (extra dataframe groupby [id, date, dagdeel]), mergen op bestaande df
+
+- windows van 4 en 8 geprobeert, 6 is best
+- 

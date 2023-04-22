@@ -26,11 +26,12 @@ if __name__ == "__main__":
     if "c" in args.steps:
         print_section("CLEANING DATA")
         clean_data()
-    if "f" in args.steps or "c" in args.steps:
+    if "f" in args.steps:
         print_section("FEATURE ENGINEERING")
         feature_engineering(args)
         
-    # cross validate, train and evaluate out-of-sample each model
-    print_section("TRAINING AND EVALUATING MODELS")
-    for model in args.models:
-        model_functions[model](args)
+    if "m" in args.steps:
+        # cross validate, train and evaluate out-of-sample each model
+        print_section("TRAINING AND EVALUATING MODELS")
+        for model in args.models:
+            model_functions[model](args)

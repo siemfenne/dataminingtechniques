@@ -6,17 +6,10 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.model_selection import train_test_split
 import lightgbm as lgb
 from utils.load import load_feature_target_set
-
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
-import sys
 import matplotlib.pyplot as plt
-from tqdm import tqdm
-import itertools
-import math
-import random
-from pathlib import Path
 from tqdm import tqdm
 plt.style.use('seaborn')
 
@@ -65,10 +58,12 @@ def fit_rnn(args):
     _, X_train, _, y_train, _, X_test, _, y_test = stratified_split_by_id(X_recurrent, X_simple, X_baseline, y, ids)
     n_features = X_train[0].shape[1]
     
-    gridsearch = False
+    gridsearch = True
     
     if gridsearch == True:
-        gridsearch_results = pd.DataFrame(columns = ["lr", "batch_size", "hid_dim", "epochs", "avg_score"])
+        param_names = ["lr", "batch_size", "hid_dim", "epochs"]
+        columns = param_names + ["avg_score"]
+        gridsearch_results = pd.DataFrame(columns = columns)
         k = 0
         for lr in [0.001]:
             for batch_size in [10]:
@@ -86,13 +81,14 @@ def fit_rnn(args):
                             cv = KFold(n_splits=5, shuffle=True, random_state=52),
                             **params
                         )
-                        print(params, fold_scores_test)
                         gridsearch_results.loc[k] = [lr, batch_size, hid_dim, epochs, fold_scores_test]
                         k+=1   
-        print(gridsearch_results.sort_values("avg_score").reset_index(drop=True))       
         lr, batch_size, hid_dim, epochs, _ = tuple(gridsearch_results.sort_values("avg_score").reset_index(drop=True).iloc[0].values)
         batch_size, epochs, hid_dim = int(batch_size), int(epochs), int(hid_dim)
+        
+        print(f"RNN - GridSearch - Best params = {dict(zip(columns, (lr, batch_size, hid_dim, epochs)))} - Best avg sore = {_}")
     else:
+        # default parameters
         lr = .001
         batch_size = 1
         hid_dim = 50
@@ -101,6 +97,7 @@ def fit_rnn(args):
     data_train = DataSet(X_train, y_train)
     data_test = DataSet(X_test, y_test)
     
+    # after cross validation or using default params, train model on full training set and evaluate on the unseen test set
     model = LSTM(in_dim=n_features, hid_dim=hid_dim, out_dim=1)
     model, train_losses, test_losses = train_torch_model(
         model = model,
@@ -114,12 +111,6 @@ def fit_rnn(args):
     
     mae = evaluation_model_torch_numpy_mae(model, data_test)
     print(f"RNN - Test - MSE loss = {best_loss_test} - MAE loss = {mae}")
-    # plt.plot(np.log(train_losses), label = "train")
-    # plt.plot(np.log(test_losses), label = "test")
-    # plt.legend()
-    # plt.show()
-    # mse = evaluation_model_torch_numpy_mse(model, data_test)
-    # print(f"mse testset: {mse}")
 
 ######################
 ###### MODEL XGB #######
@@ -138,10 +129,6 @@ def fit_lgb(args):
     X_recurrent, X_simple, X_baseline, y, ids = load_feature_target_set()
     columns = X_simple.columns
     X_train, _, _, y_train, X_test, _, _, y_test = stratified_split_by_id(X_recurrent, np.array(X_simple), X_baseline, y, ids)
-    print("Shape of training features: ", X_train.shape)
-    print("Shape of testing features: ", X_test.shape)
-    
-    print("Performing Kfolds for LGMBoost ...")
     param_grid = {
         # "num_leaves": [],
         "learning_rate": [0.1],
@@ -200,12 +187,6 @@ def fit_baseline(args):
     
     mse = mean_squared_error(y_test, y_pred)
     mae = mean_absolute_error(y_test, y_pred)
-    
-    # import matplotlib.pyplot as plt
-    # plt.hist(np.array(y_test).reshape(-1) - np.array(y_pred).reshape(-1))
-    # plt.show()
-    # plt.scatter(np.array(y_pred).reshape(-1), np.array(y_test).reshape(-1))
-    # plt.show()
     print(f"Baseline - Test - MSE loss = {mse} | MAE loss = {mae}")
     
 #######################

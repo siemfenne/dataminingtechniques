@@ -37,59 +37,64 @@ def feature_engineering(args: Namespace):
     normalize_features = True
     if normalize_features:
         print("Normalizing data (recurrent and simple) ...")
+        # normalize non-temporal data
         X_simple = normalize_data(X_simple)
-        X_r_norm = normalize_data(pd.concat(X_recurrent))
-        X_recurrent = [X_r_norm[i:i+args.agg_window].reset_index(drop=True) for i in range(len(X_recurrent))]
+        
+        # normalize temporal data (concat -> normalize -> transform back to seperate sequences)
+        n_sequences = len(X_recurrent)
+        X_recurrent = normalize_data(pd.concat(X_recurrent))
+        X_recurrent = [X_recurrent[i:i+args.agg_window].reset_index(drop=True) for i in range(n_sequences)]
+        
         # baseline not reshaped (lagged value == prediction)
+        
     store_features_and_targets(X_simple, X_recurrent, X_baseline, y, ids, path = "data/")
 
 def add_categorical_for_part_of_day(df: pd.DataFrame, window: int = 6):
+    """ 
+    Under the hypothesis the time of day of user activity can be predictive for mood,
+    the count and sum is computed for the recorded variables related to screen time
+    """
     
     if 24 % window > 0:
-        raise Exception("window not allowed")
+        raise ValueError("24 Must be a multiple of the window")
     
+    # create a new column indicating the time window for each datetime value
     periods = int(24/window)
     bins = [i*window for i in range(periods+1)]
     labels = [f"{i*window}-{(1+i)*window}" for i in range(periods)]
-
-    # create a new column indicating the time window for each datetime value
     df["time_window"] = pd.cut(
         df['time'].dt.hour,
         bins=bins, 
         labels=labels,
         include_lowest=True
     )
-    df = pd.get_dummies(df, columns=["time_window"])
-    
-    # aggregate part of day to days, using count
-    df_time_window = pd.pivot_table(df, values=["time_window_" + l for l in labels], index=['id', 'date'],
-                            columns=['variable'], aggfunc=['count'], fill_value=0)
-    
+        
+    # aggregate part of day to days, using count and sum for all screen variables
+    # because all variables related to screen time, nan values automatically to 0!
+    df_time_window = df[(df.variable != "mood") & (df.variable != "circumplex.arousal") & (df.variable != "circumplex.valence")]
+    df_time_window = df_time_window \
+        .pivot_table(values=["value"], index=["id", "date", "time_window"], columns=["variable"], aggfunc=["count", np.sum], fill_value=0) \
+        .reset_index().pivot(index=["id", "date"], columns=["time_window"])
+    df_time_window.columns = [f"time_window_{c[0]}_{c[2]}_{c[3]}" for c in df_time_window.columns]
 
-    # aggregate attributes to days, using both sum and mean
-    df_attr = pd.pivot_table(df, values='value', index=['id', 'date'],
+    # aggregate also full days, using both sum and mean
+    # all screen time related values use sum, else mean
+    df_attr = df.pivot_table(values='value', index=['id', 'date'],
                             columns=['variable'], aggfunc=[np.sum, np.mean], fill_value=np.nan)
-    # # columns_to_take_log_for = list(set(df_attr.columns) - set(["id", "date", "mood", "circumplex.arousal", "circumplex.valence", "activity", "sms", "call"]))
-    # columns_to_take_log_for = [c for c in df_attr.columns if "appCat." in c or "screen" in c]
-    # df_attr[columns_to_take_log_for] = np.log(df_attr[columns_to_take_log_for])
-    
     for column in df_attr["sum"].columns:
         if column in ["mood", "circumplex.arousal", "circumplex.valence"]:
             del df_attr["sum", column]
         else:
             del df_attr["mean", column]
-    
     df_attr.columns = [c[0] + "_" + c[1] for c in df_attr.columns]
-    df_time_window.columns = list(df_time_window["count"].columns)
-    df_time_window.rename(columns="_".join, inplace=True)
-    df = pd.merge(df_attr, df_time_window, on=["date", "id"])
-    
-    return df
+     
+    # merge the 2 dataframes together
+    return pd.merge(df_attr, df_time_window, on=["date", "id"], how="left")
     
 def missing_value_interpolation(df: pd.DataFrame):
     """ add a categorial variable which indicates the part of day """
     # for all variables containing sum (i.e. related to screen time), nan values are set to zero
-    columns_to_fill_zero = [c for c in df.columns if "sum_" in c]
+    columns_to_fill_zero = [c for c in df.columns if "sum_" in c or "count_" in c]
     df[columns_to_fill_zero] = df[columns_to_fill_zero].fillna(0)
     columns_to_impute_otherwise = set([c for c in df.columns if "sum_" in c or "mean_" in c]) - set(columns_to_fill_zero)
     print(f"Imputing missing values with 0, except for columns: {columns_to_impute_otherwise}")
@@ -98,9 +103,10 @@ def missing_value_interpolation(df: pd.DataFrame):
     # store copy of moods so targets are not interpolated
     moods = df.copy()["mean_mood"]
     
+    # important for KNN neighbors regression
     df_norm = normalize_data(df.copy())
     
-    df = df.reset_index() # add two columns with id and date
+    df = df.reset_index() # add two columns with id and date from index
     df.date = pd.to_datetime(df.date)
     df_norm = df.reset_index()
     df_norm.date = pd.to_datetime(df_norm.date)
@@ -194,11 +200,6 @@ def df_to_features_and_targets(args, df: pd.DataFrame):
     for id in tqdm(df.id.unique()):
         df_id = df[df.id == id]
         
-        # from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
-        # import matplotlib.pyplot as plt
-        # plot_pacf(df_id["mean_mood"])
-        # plt.show()
-        
         for i, row in df_id.iterrows():
             target_row = df_id.loc[i]
             target_mood = target_row["mean_mood_initial"]
@@ -287,6 +288,13 @@ def store_features_and_targets(X_simple: np.ndarray, X_recurrent: list, X_baseli
         pkl.dump(ids, f)
     with open(path + 'y.pkl', 'wb') as f:
         pkl.dump(y, f)
+        
+def check_for_nan(df: pd.DataFrame):
+    """ A function to easily check for all nan values present in the dataframe """
+    for column in df.columns:
+        nan_count = np.sum(df[column].isna())
+        if nan_count > 0:
+            print(f"column: {column} - nan_count: {nan_count} - total val. present: {len(df[column])}")
     
 # agg_config = {
 #     "appCat.builtin": [],

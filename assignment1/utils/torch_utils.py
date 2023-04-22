@@ -57,7 +57,7 @@ def evaluation_model_torch_numpy_mae(model: nn.Module, data_validate: DataSet):
     y_true = data_validate.y_t.detach().numpy().reshape(-1,1)
     return mean_absolute_error(y_true, y_pred)
 
-def cross_validate_torch(X_train, y_train, verbose = 0, lr = .001, batch_size = 10, hid_dim = 50, epochs = 20, window_size = 5, cv = KFold(n_splits=10, shuffle=True)):
+def cross_validate_torch(X_train, y_train, verbose = 0, lr = .001, batch_size = 10, hid_dim = 50, epochs = 20, cv = KFold(n_splits=10, shuffle=True)):
     n_features = X_train[0].shape[1]
     kf = cv
 
@@ -68,7 +68,7 @@ def cross_validate_torch(X_train, y_train, verbose = 0, lr = .001, batch_size = 
     for i, (train_idx, validate_idx) in enumerate(kf.split(train_data.x_t), 1):
 
         # initialize model, optimizer and criterion
-        model = LSTM(in_dim=n_features, hid_dim=hid_dim, out_dim=1, window_size=window_size)
+        model = LSTM(in_dim=n_features, hid_dim=hid_dim, out_dim=1)
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
         criterion = nn.MSELoss()
 
