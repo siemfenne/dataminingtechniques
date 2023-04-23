@@ -38,5 +38,5 @@ TODO:
 - distribution figuur mood
 - nan waardes na dag aggregatie plotten (?)
 
-- windows van 4 en 8 geprobeert, 6 is best
-- 
+- windows van 4 en 8 geprobeert, niet relevant, windows weglaten
+- ignore nan in skew calculation circumplex.valence/arousal

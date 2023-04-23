@@ -29,7 +29,7 @@ def feature_engineering(args: Namespace):
     df.reset_index()
     df = missing_value_interpolation(df)
     df = userid_to_dummies(df)
-    # df = add_weekday_dummy(df)
+    df = add_weekday_dummy(df)
     df = select_important_features_by_univariate_selection(args, df)
     
     X_simple, X_recurrent, X_baseline, y, ids = df_to_features_and_targets(args, df)
@@ -163,7 +163,7 @@ def select_important_features_by_univariate_selection(args, df):
     """
     target_column = ["mean_mood_initial"]
     # exclude_from_selection = ["date"] + [c for c in df.columns if "time_window" in c or "id" == c] # exclude id itself, include dummies in SelectKBest
-    exclude_from_selection = ["date", "id"]
+    exclude_from_selection = ["date", "id", "is_weekend"]
     feature_columns = [c for c in df.columns if c not in target_column and c not in exclude_from_selection]
     features = df[feature_columns]
     
@@ -206,6 +206,7 @@ def df_to_features_and_targets(args, df: pd.DataFrame):
         for i, row in df_id.iterrows():
             target_row = df_id.loc[i]
             target_mood = target_row["mean_mood_initial"]
+            target_is_weekend = target_row["is_weekend"]
             if pd.isna(target_mood):
                 continue
             target_date = target_row.date
@@ -231,14 +232,14 @@ def df_to_features_and_targets(args, df: pd.DataFrame):
             
             # the X_simple part
             df_simple = df_in_window.copy().reset_index(drop=True)
-            df_simple = df_simple.drop(["id", "date", "mean_mood_initial"], axis = 1)
+            df_simple = df_simple.drop(["id", "date", "mean_mood_initial", "is_weekend"], axis = 1)
             
             columns_to_agg_for_continuous = [c for c in df_simple.columns if "id_" not in c]
             columns_to_store_last = list(set([c for c in df_simple.columns]) - set(columns_to_agg_for_continuous))
 
             def wm(s: pd.Series):
                 s = s.values
-                return np.average(s, weights = [1+1 for i in range(len(s))])
+                return np.average(s, weights = [i+1 for i in range(len(s))])
         
             def select_first(s: pd.Series):
                 return s.values[0]
@@ -252,7 +253,8 @@ def df_to_features_and_targets(args, df: pd.DataFrame):
             # apply the aggregation dict and convert the data to a single row
             df_agg = df_simple \
                 .apply(agg_dict).reset_index() \
-                .pivot(columns="index").sum(skipna=True, min_count=1).dropna(0)
+                .pivot(columns="index").sum(skipna=True, min_count=1).dropna()
+            df_agg["is_weekend_target"] = target_is_weekend
             agg_array = np.array(df_agg.values).reshape(-1)
             X_simple_columns = [c[0] + "_" + c[1] for c in df_agg.index]
             
@@ -287,8 +289,11 @@ def normalize_data(df: pd.DataFrame):
             df[column] = scaler.fit_transform(values.values.reshape(-1,1))
     return df
 
-# def add_weekday_dummy(df: pd.DataFrame):
-    
+def add_weekday_dummy(df: pd.DataFrame):
+    """ Add a dummy, indicating whether or not the current day is a Saturday/Sunday"""
+    week_ints = df["date"].dt.weekday
+    df["is_weekend"] = np.where(week_ints >= 5 , 1, 0)
+    return df
     
 def store_features_and_targets(X_simple: np.ndarray, X_recurrent: list, X_baseline: np.ndarray, y: list, ids: list, filename: str = "data_features", path: str = "data/"):
     
