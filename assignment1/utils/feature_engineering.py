@@ -11,15 +11,14 @@ def feature_engineering(args: Namespace):
     # load cleaned data
     df = load_processed_data_csv()
     
-    if args.window:
+    if args.window > 0:
         df = add_categorical_for_part_of_day(df, args.window)
     else:
-        # pivot table
-        df = pd.pivot_table(df, 
-            values='value',
-            index=['id', 'date'],
-            columns=['variable'],
-            aggfunc=[np.sum, np.mean, "count"]).reset_index()
+        print("Creating pivot table, not adding part-of-day aggregation")
+        # aggregate also full days, using both sum and mean
+        # all screen time related values use sum, else mean
+        df = df.pivot_table(values='value', index=['id', 'date'],
+                                columns=['variable'], aggfunc=[np.sum, np.mean], fill_value=np.nan)
         for column in df["sum"].columns:
             if column in ["mood", "circumplex.arousal", "circumplex.valence"]:
                 del df["sum", column]
@@ -30,6 +29,7 @@ def feature_engineering(args: Namespace):
     df.reset_index()
     df = missing_value_interpolation(df)
     df = userid_to_dummies(df)
+    # df = add_weekday_dummy(df)
     df = select_important_features_by_univariate_selection(args, df)
     
     X_simple, X_recurrent, X_baseline, y, ids = df_to_features_and_targets(args, df)
@@ -76,6 +76,9 @@ def add_categorical_for_part_of_day(df: pd.DataFrame, window: int = 6):
         .pivot_table(values=["value"], index=["id", "date", "time_window"], columns=["variable"], aggfunc=["count", np.sum], fill_value=0) \
         .reset_index().pivot(index=["id", "date"], columns=["time_window"])
     df_time_window.columns = [f"time_window_{c[0]}_{c[2]}_{c[3]}" for c in df_time_window.columns]
+    for time_label in labels:
+        del df_time_window["time_window_sum_sms_" + time_label]
+        del df_time_window["time_window_sum_call_" + time_label]
 
     # aggregate also full days, using both sum and mean
     # all screen time related values use sum, else mean
@@ -242,7 +245,7 @@ def df_to_features_and_targets(args, df: pd.DataFrame):
         
             agg_dict = {}
             for column in columns_to_agg_for_continuous:
-                agg_dict[column] = [np.mean, np.std, np.max, np.min, wm]
+                agg_dict[column] = [np.mean, np.std]#[np.mean, np.std, np.max, np.min, wm]
             for column in columns_to_store_last:
                 agg_dict[column] = [select_first]
                 
@@ -273,7 +276,8 @@ def df_to_features_and_targets(args, df: pd.DataFrame):
     return X_simple, X_recurrent, X_baseline, y, ids
 
 def normalize_data(df: pd.DataFrame):
-    columns_to_normalize = set(df.columns) - set([c for c in df.columns if "id_" in c]) - set(["date", "id", "mean_mood_initial", "mean_mood"])
+    """ Normalize the features """
+    columns_to_normalize = set(df.columns) - set([c for c in df.columns if "id_" in c]) - set(["date", "id", "mean_mood_initial"])
     # columns_to_normalize = [column for column in df.variable.unique() if "appCat." in column or column in ["screen", "activity"]]
     scaler = MinMaxScaler()
     
@@ -282,6 +286,9 @@ def normalize_data(df: pd.DataFrame):
         if len(values) > 0:
             df[column] = scaler.fit_transform(values.values.reshape(-1,1))
     return df
+
+# def add_weekday_dummy(df: pd.DataFrame):
+    
     
 def store_features_and_targets(X_simple: np.ndarray, X_recurrent: list, X_baseline: np.ndarray, y: list, ids: list, filename: str = "data_features", path: str = "data/"):
     

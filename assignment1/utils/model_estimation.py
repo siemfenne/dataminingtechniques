@@ -14,7 +14,7 @@ plt.style.use('seaborn')
 ###### HELPER FUNCTIONS #######
 ###############################
 
-def evaluation_mse(mod, X, y_true, plot=False, path="figures/", name="test_figure"):
+def evaluation_mse_score(mod, X, y_true, plot=False, path="figures/", name="test_figure"):
     y_pred = mod.predict(X)
     if plot:
         fig, ax = plt.subplots(1,1, figsize=(10,10))
@@ -118,6 +118,7 @@ def fit_rnn(args):
 ########################
 
 def fit_lgb(args):
+    """ Determine the model specification through a cross validated grid search"""
     X_recurrent, X_simple, X_baseline, y, ids = load_feature_target_set()
     columns = X_simple.columns
     X_train, _, _, y_train, X_test, _, _, y_test = stratified_split_by_id(X_recurrent, np.array(X_simple), X_baseline, y, ids)
@@ -126,11 +127,11 @@ def fit_lgb(args):
     if gridsearch:
         param_grid = {
             # "num_leaves": [],
-            "learning_rate": [0.12, 0.08, 0.04, 0.02],
+            "learning_rate": [0.08, 0.04, 0.02, 0.01],
             "max_depth": [None, 1, 2, 4],
-            "num_leaves": [20, 40, 80, 120],
-            "n_estimators": [40, 80, 120],
-            "min_split_gain": [0, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2]
+            "num_leaves": [50, 100, 150],
+            "n_estimators": [50, 100],
+            "min_split_gain": [0]
             
         }
     else:
@@ -147,7 +148,7 @@ def fit_lgb(args):
         estimator = mod,
         param_grid = param_grid,
         cv = KFold(5, shuffle=True, random_state=52),
-        scoring = evaluation_mse,
+        scoring = evaluation_mse_score,
         verbose=0
     )
     gs.fit(pd.DataFrame(columns = columns, data = X_train), y_train)
