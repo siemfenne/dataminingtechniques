@@ -14,6 +14,7 @@ def feature_engineering(args: Namespace):
     if args.window > 0:
         df = add_categorical_for_part_of_day(df, args.window)
     else:
+        raise Exception("Aggregation without daily window is not updated to most recent feature engineering!")
         print("Creating pivot table, not adding part-of-day aggregation")
         # aggregate also full days, using both sum and mean
         # all screen time related values use sum, else mean
@@ -30,6 +31,10 @@ def feature_engineering(args: Namespace):
     df = missing_value_interpolation(df)
     df = userid_to_dummies(df)
     df = add_weekday_dummy(df)
+    
+    print(f"Before selecting features: {df.shape}")
+    print(df.columns.values)
+    
     df = select_important_features_by_univariate_selection(args, df)
     
     X_simple, X_recurrent, X_baseline, y, ids = df_to_features_and_targets(args, df)
@@ -37,6 +42,7 @@ def feature_engineering(args: Namespace):
     normalize_features = True
     if normalize_features:
         print("Normalizing features (only recurrent and simple) ...")
+        
         # normalize non-temporal data
         X_simple = normalize_data(X_simple)
         
@@ -52,7 +58,8 @@ def feature_engineering(args: Namespace):
 def add_categorical_for_part_of_day(df: pd.DataFrame, window: int = 6):
     """ 
     Under the hypothesis the time of day of user activity can be predictive for mood,
-    the count and sum is computed for the recorded variables related to screen time
+    the count and sum is computed for the recorded variables related to screen time.
+    The daily count and sum/mean are also added and a merged df is returned.
     """
     
     if 24 % window > 0:
@@ -81,7 +88,7 @@ def add_categorical_for_part_of_day(df: pd.DataFrame, window: int = 6):
         del df_time_window["time_window_sum_call_" + time_label]
 
     # aggregate also full days, using both sum and mean
-    # all screen time related values use sum, else mean
+    # all screen time related values use sum, else mean, thus deleting the other one
     df_attr = df.pivot_table(values='value', index=['id', 'date'],
                             columns=['variable'], aggfunc=[np.sum, np.mean], fill_value=np.nan)
     for column in df_attr["sum"].columns:
@@ -95,7 +102,11 @@ def add_categorical_for_part_of_day(df: pd.DataFrame, window: int = 6):
     return pd.merge(df_attr, df_time_window, on=["date", "id"], how="left")
     
 def missing_value_interpolation(df: pd.DataFrame):
-    """ add a categorial variable which indicates the part of day """
+    """ 
+    The summation above resulted in nan-values at some places
+    Sums and counts can be filled with zeros.
+    For the ratings, such as mean, valence, arousal, KNN neighbors regression is performed.
+    """
     # for all variables containing sum (i.e. related to screen time), nan values are set to zero
     columns_to_fill_zero = [c for c in df.columns if "sum_" in c or "count_" in c]
     df[columns_to_fill_zero] = df[columns_to_fill_zero].fillna(0)
@@ -159,22 +170,35 @@ def userid_to_dummies(df: pd.DataFrame):
 def select_important_features_by_univariate_selection(args, df):
     """ 
     For a list of columns (exclude the original target column + some other columns), perform F regression and select the most important features.
+    Feature importance can also be determined by gradient boosting + feature importance.
     These features are used later on in the temporal data and/or used for further aggregation
     """
     target_column = ["mean_mood_initial"]
     # exclude_from_selection = ["date"] + [c for c in df.columns if "time_window" in c or "id" == c] # exclude id itself, include dummies in SelectKBest
-    exclude_from_selection = ["date", "id", "is_weekend"]
+    exclude_from_selection = ["date", "id", "is_weekend"] + [c for c in df.columns if "id_" in c]
     feature_columns = [c for c in df.columns if c not in target_column and c not in exclude_from_selection]
     features = df[feature_columns]
     
     print("Selecting most important features out of:\n", feature_columns)
     targets = df["mean_mood_initial"].shift(-1)
     features = features[targets.notna()]
+    total_features = features.shape[1]
     targets = targets.dropna()
-    from sklearn.feature_selection import SelectPercentile, SelectKBest, f_regression
-    s = SelectKBest(f_regression, k = args.k_features)
-    s.fit(features, targets)
-    selected_features = features.columns[s.get_support(indices=True)]
+    
+    if args.criterium == "kbest":
+        from sklearn.feature_selection import SelectPercentile, SelectKBest, f_regression
+        s = SelectKBest(f_regression, k = args.k_features)
+        s.fit(features, targets)
+        selected_features = features.columns[s.get_support(indices=True)]
+    elif args.criterium == "lgb":
+        import lightgbm as lgb
+        mod = lgb.LGBMModel(objective="regression")
+        mod.fit(features, targets)
+        selected_features = pd.DataFrame([features.columns, mod.feature_importances_]).T \
+            .sort_values([1], ascending = [False]).reset_index(drop=True)[0].values[:args.k_features]
+    else:
+        raise ValueError("Invalid --criterium passed, must be 'lgb' or 'kbest'")
+            
     print(f"Best {args.k_features} features are:\n", selected_features)
     
     # return selected features + targets and date
@@ -198,6 +222,8 @@ def df_to_features_and_targets(args, df: pd.DataFrame):
     X_baseline = []
     ids = []
     y = []
+    
+    min_window_size = 5
 
     print("Transforming data to (temporal) features and targets ...")
     for id in tqdm(df.id.unique()):
@@ -210,15 +236,24 @@ def df_to_features_and_targets(args, df: pd.DataFrame):
             if pd.isna(target_mood):
                 continue
             target_date = target_row.date
+
+            # for varying the window, we need a minimum window size, so the size of the features do not change among aggregation windows
+            feature_date_min = target_date - pd.Timedelta(min_window_size, "D")
+            feature_date_max = target_date - pd.Timedelta(1, "D")
+            
+            # select rows in window and check for no missing dates
+            df_in_window = df_id[(df_id.date >= feature_date_min) & (df_id.date <= feature_date_max)]
+            if len(df_in_window) < min_window_size:
+                continue
             
             # for recurrent & simple, use the same window size
             feature_date_min = target_date - pd.Timedelta(args.agg_window, "D")
             feature_date_max = target_date - pd.Timedelta(1, "D")
             
-            # select rows in window and check for no missing dates
+            # # # select rows in window and check for no missing dates
             df_in_window = df_id[(df_id.date >= feature_date_min) & (df_id.date <= feature_date_max)]
-            if len(df_in_window) < args.agg_window:
-                continue
+            # if len(df_in_window) < args.agg_window:
+            #     continue
 
             # the X_recurrent part
             df_recurrent = df_in_window.copy()
@@ -268,8 +303,9 @@ def df_to_features_and_targets(args, df: pd.DataFrame):
             ids.append(id)
             
     # print the final column feature for simple
-    print("The final features for recurrent:\n", X_recurrent[0].columns)
+    print("The final features for recurrent:\n", X_recurrent[0].columns.values)
     print("The final features for simple:\n", X_simple_columns)
+    print(f"Total feature/target pairs: {len(X_simple)}")
     
     X_simple = pd.DataFrame(columns = X_simple_columns, data = np.array(X_simple))
     # X_simple = np.array(X_simple)
@@ -279,7 +315,7 @@ def df_to_features_and_targets(args, df: pd.DataFrame):
 
 def normalize_data(df: pd.DataFrame):
     """ Normalize the features """
-    columns_to_normalize = set(df.columns) - set([c for c in df.columns if "id_" in c]) - set(["date", "id", "mean_mood_initial"])
+    columns_to_normalize = set(df.columns) - set([c for c in df.columns if "id_" in c]) - set(["date", "id", "mean_mood_initial"]) - set(["mean_mood"])
     # columns_to_normalize = [column for column in df.variable.unique() if "appCat." in column or column in ["screen", "activity"]]
     scaler = MinMaxScaler()
     

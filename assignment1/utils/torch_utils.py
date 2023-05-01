@@ -30,12 +30,12 @@ class LSTM(nn.Module):
     def __init__(self, in_dim, hid_dim, out_dim):
         super(LSTM, self).__init__()
         self.hid_dim = hid_dim
-        self.lstm = nn.LSTM(in_dim, hid_dim)
+        self.lstm = nn.LSTM(in_dim, hid_dim, batch_first=True)
         self.linear = nn.Linear(hid_dim, out_dim)
 
     def forward(self, inputs):
-        h0 = torch.zeros(1, inputs.size(1), self.hid_dim).to(inputs.device)
-        c0 = torch.zeros(1, inputs.size(1), self.hid_dim).to(inputs.device)
+        h0 = torch.zeros(1, inputs.size(0), self.hid_dim)
+        c0 = torch.zeros(1, inputs.size(0), self.hid_dim)
         lstm_out, self.hidden_cell = self.lstm(inputs, (h0, c0))
         last_output = lstm_out[:, -1, :]
         predictions = self.linear(last_output)
@@ -43,14 +43,14 @@ class LSTM(nn.Module):
         
 def evaluation_model_torch_numpy_mse(model: nn.Module, data_validate: DataSet):
     """ Evaluate the mse of the model. mean_squared_error has some small numerical differences with torch mse """
-    y_pred = model(data_validate.x_t).detach().numpy().reshape(-1,1)
-    y_true = data_validate.y_t.detach().numpy().reshape(-1,1)
+    y_pred = model(data_validate.x_t).detach().numpy().reshape(-1,)
+    y_true = data_validate.y_t.detach().numpy().reshape(-1,)
     return mean_squared_error(y_true, y_pred)
 
 def evaluation_model_torch_numpy_mae(model: nn.Module, data_validate: DataSet):
     """ Evaluate the mse of the model. mean_squared_error has some small numerical differences with torch mse """
-    y_pred = model(data_validate.x_t).detach().numpy().reshape(-1,1)
-    y_true = data_validate.y_t.detach().numpy().reshape(-1,1)
+    y_pred = model(data_validate.x_t).detach().numpy().reshape(-1,)
+    y_true = data_validate.y_t.detach().numpy().reshape(-1,)
     return mean_absolute_error(y_true, y_pred)
 
 def cross_validate_torch(X_train, y_train, verbose = 0, lr = .001, batch_size = 10, hid_dim = 50, epochs = 20, cv = KFold(n_splits=10, shuffle=True)):
@@ -72,7 +72,7 @@ def cross_validate_torch(X_train, y_train, verbose = 0, lr = .001, batch_size = 
         data_train, data_validate = train_data.split(train_idx, validate_idx)
         
         # train on training set and validate after each epoch
-        model, training_loss_list, validation_loss_list = train_torch_model(model, optimizer, criterion, data_train, data_validate, verbose, epochs = 10, batch_size=10)
+        model, training_loss_list, validation_loss_list = train_torch_model(model, optimizer, criterion, data_train, data_validate, verbose, epochs = epochs, batch_size = batch_size)
         
         # store last training and validation scores
         last_training_loss, last_validation_loss = training_loss_list[-1], validation_loss_list[-1]
